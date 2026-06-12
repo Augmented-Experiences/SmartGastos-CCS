@@ -1934,7 +1934,7 @@ function obAsk(stepIdx) {
   const sugsEl = document.getElementById('obSugs');
   if (sugsEl) {
     sugsEl.innerHTML = step.suggestions.map(s =>
-      `<div class="ob-sug" onclick="obPickSug('${escHtml(s).replace(/'/g, "\\'")}')">&#36;{escHtml(s)}</div>`
+      `<div class="ob-sug" onclick="obPickSug('${escHtml(s).replace(/'/g, "\\'")}')">` + escHtml(s) + `</div>`
     ).join('');
   }
   const input = document.getElementById('obInput');
