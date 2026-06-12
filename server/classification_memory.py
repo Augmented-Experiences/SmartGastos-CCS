@@ -13,12 +13,20 @@ MEJORAS v1.5:
     un documento, guarda el contexto para futuras clasificaciones similares.
 """
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict
 
+logger = logging.getLogger(__name__)
+
 # Directorio de datos (se configura al importar)
 _DATA_DIR = Path(__file__).parent.parent / "data"
+
+# Límites de tamaño para evitar DoS de disco
+MAX_HUMAN_LEARNINGS = 500  # Máximo de clasificaciones humanas por empresa
+MAX_AUTO_LEARNINGS = 300   # Máximo de clasificaciones automáticas por empresa
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB máximo por archivo de aprendizaje
 
 
 def set_data_dir(data_dir: Path):
@@ -118,14 +126,21 @@ def save_classification_learning(
         }
         learnings.append(new_entry)
 
-    # Guardar (máximo 500 entradas, las más recientes primero)
+    # Guardar (máximo MAX_HUMAN_LEARNINGS entradas, las más recientes primero)
     learnings.sort(key=lambda x: x.get("ultima_correccion", ""), reverse=True)
-    learnings = learnings[:500]
-    learn_file.write_text(
-        json.dumps(learnings, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
-    print(f"INFO: Aprendizaje guardado — '{proveedor}' → '{new_cat_name}' (total: {len(learnings)})")
+    learnings = learnings[:MAX_HUMAN_LEARNINGS]
+    
+    # Verificar tamaño antes de escribir
+    content = json.dumps(learnings, ensure_ascii=False, indent=2)
+    if len(content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+        # Reducir entradas hasta que quepa
+        while len(content.encode('utf-8')) > MAX_FILE_SIZE_BYTES and len(learnings) > 50:
+            learnings = learnings[:len(learnings) // 2]
+            content = json.dumps(learnings, ensure_ascii=False, indent=2)
+        logger.warning(f"Archivo de aprendizaje truncado a {len(learnings)} entradas por límite de tamaño")
+    
+    learn_file.write_text(content, encoding="utf-8")
+    logger.info(f"Aprendizaje guardado: '{proveedor}' → '{new_cat_name}' (total: {len(learnings)})")
 
 
 def save_auto_classification_context(
@@ -202,13 +217,19 @@ def save_auto_classification_context(
             "ultima_vez": datetime.utcnow().isoformat()
         })
 
-    # Guardar (máximo 300 entradas)
+    # Guardar (máximo MAX_AUTO_LEARNINGS entradas)
     auto_learnings.sort(key=lambda x: x.get("veces_visto", 0), reverse=True)
-    auto_learnings = auto_learnings[:300]
-    auto_file.write_text(
-        json.dumps(auto_learnings, ensure_ascii=False, indent=2),
-        encoding="utf-8"
-    )
+    auto_learnings = auto_learnings[:MAX_AUTO_LEARNINGS]
+    
+    # Verificar tamaño antes de escribir
+    content = json.dumps(auto_learnings, ensure_ascii=False, indent=2)
+    if len(content.encode('utf-8')) > MAX_FILE_SIZE_BYTES:
+        while len(content.encode('utf-8')) > MAX_FILE_SIZE_BYTES and len(auto_learnings) > 50:
+            auto_learnings = auto_learnings[:len(auto_learnings) // 2]
+            content = json.dumps(auto_learnings, ensure_ascii=False, indent=2)
+        logger.warning(f"Auto-aprendizaje truncado a {len(auto_learnings)} entradas")
+    
+    auto_file.write_text(content, encoding="utf-8")
 
 
 def get_classification_learnings(empresa_id: str) -> str:

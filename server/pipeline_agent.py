@@ -74,8 +74,8 @@ def _ollama_list() -> List[str]:
         r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
         if r.status_code == 200:
             return [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"No se pudo obtener modelos de Ollama: {e}")
     return []
 
 
@@ -170,7 +170,7 @@ def _extract_fields_from_thinking(thinking_text: str) -> Dict:
         try:
             val = float(cleaned)
             return val if val > 0 else None
-        except Exception:
+        except (ValueError, TypeError):
             return None
 
     amount_fields = {'monto_total', 'monto_neto', 'iva'}
@@ -357,8 +357,8 @@ def _run_tesseract(img_path: str) -> str:
                     best = text
                 if best_words > 60:
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Excepción controlada: {e}")
     return best
 
 
@@ -408,8 +408,8 @@ def ocr_image(img_path: str) -> Dict:
     for v in variants[1:]:
         try:
             os.unlink(v)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Excepción controlada: {e}")
 
     # EasyOCR si Tesseract dio poco
     if best_words < 15:
@@ -448,8 +448,8 @@ def ocr_pdf(pdf_path: str) -> Dict:
         words = len([w for w in text.split() if len(w) > 2])
         if words >= 15:
             return {"text": text, "words": words, "method": "pdf_digital"}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Excepción controlada: {e}")
 
     # PDF escaneado → imagen → OCR
     try:
@@ -465,8 +465,8 @@ def ocr_pdf(pdf_path: str) -> Dict:
                 all_text.append(result["text"])
             try:
                 os.unlink(tmp_name)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Excepción controlada: {e}")
         text = "\n".join(all_text)
         return {"text": text, "words": len([w for w in text.split() if len(w) > 2]),
                 "method": "pdf_scanned"}
@@ -554,8 +554,8 @@ def _extract_by_regex(text: str) -> Dict:
                 if 1 <= day_int <= 31 and 1 <= mon_int <= 12:
                     fields["fecha_emision"] = f"{y}-{mo.zfill(2)}-{d.zfill(2)}"
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Excepción controlada: {e}")
 
     # ── Montos ──
     def parse_amount(raw: str) -> Optional[float]:
@@ -573,7 +573,7 @@ def _extract_by_regex(text: str) -> Dict:
         try:
             val = float(cleaned)
             return val if val > 0 else None
-        except Exception:
+        except (ValueError, TypeError):
             return None
 
     # Total — múltiples formatos latinoamericanos
@@ -932,15 +932,15 @@ def _parse_json_response(text: str) -> Dict:
                     result = json.loads(cleaned)
                     if isinstance(result, dict) and result:
                         return result
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Excepción controlada: {e}")
     # Último intento: parsear el texto completo
     try:
         result = json.loads(text)
         if isinstance(result, dict):
             return result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Excepción controlada: {e}")
     return {}
 
 
@@ -1719,8 +1719,8 @@ class DocumentPipelineAgent:
                             "mensaje": f"Neto ({monto_neto}) + IVA ({iva}) ≠ Total ({monto_total})"
                         })
                         requiere_revision = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Excepción controlada: {e}")
 
             # Baja confianza de clasificación
             if ctx["classification"].get("confianza", 0) < 0.5:
@@ -1945,8 +1945,8 @@ class DocumentPipelineAgent:
                 try:
                     fecha_emision = datetime.strptime(str(fields["fecha_emision"]), fmt)
                     break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Excepción controlada: {e}")
 
         # Montos
         def to_float(v) -> Optional[float]:

@@ -28,7 +28,8 @@ TIMEOUT_EXTRACTION = int(os.environ.get("OLLAMA_TIMEOUT_EXTRACTION", "180"))
 TIMEOUT_AUDIT = int(os.environ.get("OLLAMA_TIMEOUT_AUDIT", "180"))
 TIMEOUT_CHAT = int(os.environ.get("OLLAMA_TIMEOUT_CHAT", "60"))
 
-# Tracking global de uso
+# Tracking global de uso (protegido por lock para thread safety)
+_stats_lock = threading.Lock()
 _usage_stats = {
     "total_calls": 0,
     "successful_calls": 0,
@@ -40,13 +41,15 @@ _usage_stats = {
     "injection_attempts_blocked": 0
 }
 
-# Estado de descarga de modelos
+# Estado de descarga de modelos (protegido por lock)
+_pull_lock = threading.Lock()
 _pull_status: Dict = {}
 
 
 def get_usage_stats() -> Dict:
-    """Retorna estadísticas de uso del LLM."""
-    return dict(_usage_stats)
+    """Retorna estadísticas de uso del LLM (thread-safe)."""
+    with _stats_lock:
+        return dict(_usage_stats)
 
 
 def call_ollama(
@@ -92,7 +95,8 @@ def call_ollama(
     # Capa 2: Sanitizar input del usuario
     if not skip_sanitization:
         if detect_injection_attempt(user_message):
-            _usage_stats["injection_attempts_blocked"] += 1
+            with _stats_lock:
+                _usage_stats["injection_attempts_blocked"] += 1
             logger.warning(f"Intento de inyección detectado y neutralizado")
         user_message = sanitize_user_input(user_message)
 
@@ -117,7 +121,8 @@ def call_ollama(
         payload["messages"][-1]["images"] = images
 
     start_time = time.time()
-    _usage_stats["total_calls"] += 1
+    with _stats_lock:
+        _usage_stats["total_calls"] += 1
 
     try:
         resp = requests.post(
@@ -130,7 +135,8 @@ def call_ollama(
         if resp.status_code == 404:
             # Modelo no encontrado — iniciar descarga automática
             _start_pull_background(model)
-            _usage_stats["failed_calls"] += 1
+            with _stats_lock:
+                _usage_stats["failed_calls"] += 1
             raise Exception(f"Modelo {model} no disponible. Descarga iniciada automáticamente.")
 
         resp.raise_for_status()
@@ -140,24 +146,26 @@ def call_ollama(
         content = sanitize_llm_response(content)
         content = fix_encoding(content)
 
-        # Tracking
+        # Tracking (thread-safe)
         elapsed_ms = int((time.time() - start_time) * 1000)
-        _usage_stats["successful_calls"] += 1
-        savings = estimate_savings(user_message, content)
-        _usage_stats["total_input_tokens"] += savings["input_tokens"]
-        _usage_stats["total_output_tokens"] += savings["output_tokens"]
-        _usage_stats["total_savings_usd"] += savings["savings_usd"]
+        with _stats_lock:
+            _usage_stats["successful_calls"] += 1
+            savings = estimate_savings(user_message, content)
+            _usage_stats["total_input_tokens"] += savings["input_tokens"]
+            _usage_stats["total_output_tokens"] += savings["output_tokens"]
+            _usage_stats["total_savings_usd"] += savings["savings_usd"]
 
-        # Promedio móvil de latencia
-        n = _usage_stats["successful_calls"]
-        _usage_stats["avg_latency_ms"] = int(
-            (_usage_stats["avg_latency_ms"] * (n - 1) + elapsed_ms) / n
-        )
+            # Promedio móvil de latencia
+            n = _usage_stats["successful_calls"]
+            _usage_stats["avg_latency_ms"] = int(
+                (_usage_stats["avg_latency_ms"] * (n - 1) + elapsed_ms) / n
+            )
 
         return content
 
     except Exception as e:
-        _usage_stats["failed_calls"] += 1
+        with _stats_lock:
+            _usage_stats["failed_calls"] += 1
         logger.error(f"Error en call_ollama: {e}")
         raise
 
@@ -191,7 +199,8 @@ def call_ollama_generate(
     # Sanitizar
     if not skip_sanitization:
         if detect_injection_attempt(prompt):
-            _usage_stats["injection_attempts_blocked"] += 1
+            with _stats_lock:
+                _usage_stats["injection_attempts_blocked"] += 1
             logger.warning(f"Intento de inyección detectado en generate")
         prompt = sanitize_user_input(prompt)
 
@@ -216,7 +225,8 @@ def call_ollama_generate(
     if think:
         payload["think"] = True
 
-    _usage_stats["total_calls"] += 1
+    with _stats_lock:
+        _usage_stats["total_calls"] += 1
     start_time = time.time()
 
     try:
@@ -225,7 +235,8 @@ def call_ollama_generate(
 
         if resp.status_code == 404:
             _start_pull_background(model)
-            _usage_stats["failed_calls"] += 1
+            with _stats_lock:
+                _usage_stats["failed_calls"] += 1
             raise Exception(f"Modelo {model} no disponible. Descarga iniciada.")
 
         resp.raise_for_status()
@@ -236,7 +247,8 @@ def call_ollama_generate(
         clean_response = sanitize_llm_response(raw_response)
         clean_response = fix_encoding(clean_response)
 
-        _usage_stats["successful_calls"] += 1
+        with _stats_lock:
+            _usage_stats["successful_calls"] += 1
         return {
             "ok": True,
             "response": clean_response,
@@ -245,7 +257,8 @@ def call_ollama_generate(
         }
 
     except Exception as e:
-        _usage_stats["failed_calls"] += 1
+        with _stats_lock:
+            _usage_stats["failed_calls"] += 1
         logger.error(f"Error en call_ollama_generate: {e}")
         return {
             "ok": False,
@@ -272,17 +285,19 @@ def is_model_available(model: str) -> bool:
 
 
 def _start_pull_background(model: str):
-    """Inicia descarga de modelo en background."""
-    if model in _pull_status and _pull_status[model].get("status") in ("pulling", "queued"):
-        return
-    _pull_status[model] = {"status": "queued", "progress": 0, "error": None}
+    """Inicia descarga de modelo en background (thread-safe)."""
+    with _pull_lock:
+        if model in _pull_status and _pull_status[model].get("status") in ("pulling", "queued"):
+            return
+        _pull_status[model] = {"status": "queued", "progress": 0, "error": None}
     threading.Thread(target=_do_pull, args=(model,), daemon=True).start()
 
 
 def _do_pull(model: str):
-    """Descarga un modelo de Ollama en background."""
+    """Descarga un modelo de Ollama en background (thread-safe)."""
     import requests
-    _pull_status[model]["status"] = "pulling"
+    with _pull_lock:
+        _pull_status[model]["status"] = "pulling"
     try:
         with requests.post(
             f"{OLLAMA_URL}/api/pull",
@@ -293,14 +308,18 @@ def _do_pull(model: str):
                 if line:
                     data = json.loads(line)
                     if "completed" in data and "total" in data and data["total"] > 0:
-                        _pull_status[model]["progress"] = int(data["completed"] / data["total"] * 100)
-        _pull_status[model] = {"status": "done", "progress": 100, "error": None}
+                        with _pull_lock:
+                            _pull_status[model]["progress"] = int(data["completed"] / data["total"] * 100)
+        with _pull_lock:
+            _pull_status[model] = {"status": "done", "progress": 100, "error": None}
     except Exception as e:
-        _pull_status[model] = {"status": "error", "progress": 0, "error": str(e)}
+        with _pull_lock:
+            _pull_status[model] = {"status": "error", "progress": 0, "error": str(e)}
 
 
 def get_pull_status(model: str = None) -> Dict:
-    """Retorna estado de descarga de modelos."""
-    if model:
-        return _pull_status.get(model, {"status": "unknown", "progress": 0, "error": None})
-    return dict(_pull_status)
+    """Retorna estado de descarga de modelos (thread-safe)."""
+    with _pull_lock:
+        if model:
+            return _pull_status.get(model, {"status": "unknown", "progress": 0, "error": None})
+        return dict(_pull_status)

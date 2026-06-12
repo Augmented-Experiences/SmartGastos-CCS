@@ -67,14 +67,41 @@ print(f"INFO: PORT      = {PORT}")
 # Inicializar BD
 init_db()
 
-app = FastAPI(title="Pyme Ledger AI", version="1.5.0")
+app = FastAPI(title="Pyme Ledger AI", version="1.6.0")
+
+# CORS restringido a loopback (plugin on-premise, compatible cross-platform)
+_ALLOWED_ORIGINS = [
+    "http://127.0.0.1",
+    f"http://127.0.0.1:{PORT}",
+]
+# Agregar orígenes dinámicos de Pinokio si están configurados
+_pinokio_origin = os.environ.get("PINOKIO_ORIGIN", "")
+if _pinokio_origin:
+    _ALLOWED_ORIGINS.append(_pinokio_origin)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_origin_regex=r"http://(127\.0\.0\.1)(:\d+)?",  # Solo loopback
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Exception handler global: oculta stack traces internos del cliente
+import logging as _logging
+_app_logger = _logging.getLogger("pyme_ledger_ai")
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request, exc):
+    """Captura excepciones no manejadas y devuelve error genérico al cliente."""
+    import traceback
+    _app_logger.error(f"Error no manejado en {request.url.path}: {exc}\n{traceback.format_exc()}")
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Error interno del servidor. Consulta los logs para más información."}
+    )
 
 
 # ============================================================
@@ -162,6 +189,10 @@ async def model_pull_status(model: str = None):
 # Modelos Pydantic
 # ============================================================
 
+from pydantic import field_validator, model_validator
+_re = _re_mod  # Reutilizar el import existente
+
+
 class EmpresaCreate(BaseModel):
     razon_social: Optional[str] = None
     nombre: Optional[str] = None          # alias de razon_social (enviado por la UI)
@@ -172,6 +203,35 @@ class EmpresaCreate(BaseModel):
     regimen_tributario: Optional[str] = None
     giro: Optional[str] = None
 
+    @field_validator('rut')
+    @classmethod
+    def validate_rut(cls, v):
+        """Valida formato básico de RUT chileno o identificador genérico."""
+        if v and v != "00.000.000-0":
+            # Acepta formatos: XX.XXX.XXX-X, XXXXXXXX-X, o genérico
+            cleaned = v.replace('.', '').replace('-', '').replace(' ', '')
+            if len(cleaned) < 7 or len(cleaned) > 12:
+                raise ValueError(f"RUT/identificador inválido: longitud incorrecta ({len(cleaned)} chars)")
+            if not _re.match(r'^[0-9A-Za-z]+$', cleaned):
+                raise ValueError("RUT/identificador contiene caracteres no válidos")
+        return v
+
+    @field_validator('moneda_base')
+    @classmethod
+    def validate_moneda(cls, v):
+        """Valida código de moneda (3 letras ISO 4217)."""
+        if v and not _re.match(r'^[A-Z]{3}$', v.upper()):
+            raise ValueError(f"Código de moneda inválido: {v}. Use formato ISO 4217 (ej: CLP, USD)")
+        return v.upper() if v else "CLP"
+
+    @field_validator('razon_social', 'nombre', 'nombre_fantasia', 'giro')
+    @classmethod
+    def validate_string_length(cls, v):
+        """Limita longitud de strings para evitar abuso."""
+        if v and len(v) > 200:
+            return v[:200]
+        return v
+
     def get_razon_social(self) -> str:
         return self.razon_social or self.nombre or "Empresa sin nombre"
 
@@ -180,6 +240,20 @@ class CentroCostoCreate(BaseModel):
     codigo: str
     nombre: str
     descripcion: Optional[str] = None
+
+    @field_validator('codigo')
+    @classmethod
+    def validate_codigo(cls, v):
+        if v and len(v) > 50:
+            raise ValueError("Código demasiado largo (máx 50 caracteres)")
+        return v.strip()
+
+    @field_validator('nombre')
+    @classmethod
+    def validate_nombre(cls, v):
+        if not v or not v.strip():
+            raise ValueError("El nombre es obligatorio")
+        return v.strip()[:100]
 
 
 class CategoriaContableCreate(BaseModel):
@@ -190,6 +264,21 @@ class CategoriaContableCreate(BaseModel):
     descripcion: Optional[str] = None
     deducibilidad: str = "Total"
     regla_iva: str = "Recuperable"
+
+    @field_validator('nombre')
+    @classmethod
+    def validate_nombre(cls, v):
+        if not v or not v.strip():
+            raise ValueError("El nombre de la categoría es obligatorio")
+        return v.strip()[:100]
+
+    @field_validator('deducibilidad')
+    @classmethod
+    def validate_deducibilidad(cls, v):
+        allowed = {'Total', 'Parcial', 'No deducible'}
+        if v and v not in allowed:
+            return 'Total'
+        return v
 
 
 class DocumentoUpdate(BaseModel):
@@ -208,6 +297,33 @@ class DocumentoUpdate(BaseModel):
     monto_total: Optional[float] = None
     moneda: Optional[str] = None
     tipo_documento: Optional[str] = None
+
+    @field_validator('monto_neto', 'iva', 'monto_total')
+    @classmethod
+    def validate_montos(cls, v):
+        """Valida que los montos sean positivos si están presentes."""
+        if v is not None and v < 0:
+            raise ValueError("Los montos no pueden ser negativos")
+        return v
+
+    @field_validator('estado_revision')
+    @classmethod
+    def validate_estado(cls, v):
+        """Valida estados permitidos."""
+        if v:
+            allowed = {'PENDIENTE', 'REVISADO', 'RECHAZADO'}
+            if v.upper() not in allowed:
+                raise ValueError(f"Estado inválido. Permitidos: {', '.join(allowed)}")
+            return v.upper()
+        return v
+
+    @field_validator('categoria_id', 'centro_costo_id')
+    @classmethod
+    def validate_uuid_format(cls, v):
+        """Valida formato UUID básico."""
+        if v and not _re.match(r'^[0-9a-f\-]{36}$', v.lower()):
+            raise ValueError("ID inválido: debe ser un UUID válido")
+        return v
 
 
 # ============================================================
@@ -441,19 +557,49 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
         file_name = f"{file_id}{file_extension}"
         file_path = UPLOADS_DIR / file_name
 
-        contents = await file.read()
-        if not contents:
+        # Leer archivo en chunks para no saturar memoria con archivos grandes
+        total_size = 0
+        CHUNK_SIZE = 1024 * 1024  # 1 MB por chunk
+        with open(str(file_path), "wb") as f:
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_UPLOAD_BYTES:
+                    f.close()
+                    file_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Archivo demasiado grande ({total_size / 1024 / 1024:.1f} MB). M\u00e1ximo: {MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB"
+                    )
+                f.write(chunk)
+        if total_size == 0:
+            file_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="Archivo vac\u00edo")
-        if len(contents) > MAX_UPLOAD_BYTES:
+
+        # Validar MIME type real del archivo (no confiar solo en extensi\u00f3n)
+        ALLOWED_MIMES = {
+            'application/pdf', 'image/jpeg', 'image/png',
+            'image/bmp', 'image/tiff', 'image/webp',
+            'image/x-ms-bmp',  # Variante BMP en algunos sistemas
+        }
+        try:
+            import magic
+            detected_mime = magic.from_file(str(file_path), mime=True)
+        except (ImportError, Exception):
+            # Fallback a mimetypes si python-magic no está disponible
+            import mimetypes
+            detected_mime, _ = mimetypes.guess_type(str(file_path))
+        
+        if detected_mime and detected_mime not in ALLOWED_MIMES:
+            file_path.unlink(missing_ok=True)
             raise HTTPException(
-                status_code=413,
-                detail=f"Archivo demasiado grande ({len(contents) / 1024 / 1024:.1f} MB). M\u00e1ximo: {MAX_UPLOAD_BYTES / 1024 / 1024:.0f} MB"
+                status_code=400,
+                detail=f"Tipo de archivo no permitido: {detected_mime}"
             )
 
-        with open(str(file_path), "wb") as f:
-            f.write(contents)
-
-        print(f"INFO: Archivo guardado → {file_path} ({len(contents):,} bytes)")
+        print(f"INFO: Archivo guardado → {file_path} ({total_size:,} bytes)")
 
         return {
             "status": "uploaded",
@@ -461,7 +607,7 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
             "file_name": file_name,
             "file_path": str(file_path),
             "original_filename": original_name,
-            "size_bytes": len(contents),
+            "size_bytes": total_size,
             "empresa_id": empresa_id
         }
     except HTTPException:
@@ -493,16 +639,20 @@ async def process_document_stream(
         # Resolver ruta de forma segura — siempre dentro de UPLOADS_DIR
         if file_name:
             # Sanitizar: solo el nombre del archivo, sin separadores de directorio
-            safe_name = Path(file_name).name  # elimina cualquier path traversal
-            fp = UPLOADS_DIR / safe_name
+            safe_name = sanitize_filename(file_name)
+            fp = (UPLOADS_DIR / safe_name).resolve()
         elif file_path:
             # Fallback: construir desde el nombre del archivo en la ruta
-            fp = UPLOADS_DIR / Path(file_path).name
+            safe_name = sanitize_filename(Path(file_path).name)
+            fp = (UPLOADS_DIR / safe_name).resolve()
         else:
             raise HTTPException(status_code=400, detail="Se requiere file_name o file_path")
 
+        # Validación estricta anti path-traversal
+        if not validate_path_within(fp, UPLOADS_DIR):
+            raise HTTPException(status_code=403, detail="Acceso denegado: ruta fuera del directorio permitido")
         if not fp.exists():
-            raise HTTPException(status_code=404, detail=f"Archivo no encontrado en uploads: {fp.name}")
+            raise HTTPException(status_code=404, detail="Archivo no encontrado en uploads")
 
         agent = DocumentPipelineAgent(db, empresa_id, UPLOADS_DIR)
 
@@ -965,9 +1115,12 @@ async def preview_document(doc_id: str):
         doc = db.query(Documento).filter(Documento.id == doc_id).first()
         if not doc or not doc.ruta_archivo_original:
             raise HTTPException(status_code=404, detail="Documento no encontrado")
-        file_path = Path(doc.ruta_archivo_original)
+        file_path = Path(doc.ruta_archivo_original).resolve()
+        # Validar que el archivo esté dentro de UPLOADS_DIR (anti path-traversal)
+        if not validate_path_within(file_path, UPLOADS_DIR):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"Archivo no encontrado: {file_path}")
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
         ext = file_path.suffix.lower()
         headers = {"Cache-Control": "max-age=3600", "Access-Control-Allow-Origin": "*"}
 
@@ -1027,7 +1180,10 @@ async def download_document(doc_id: str):
         doc = db.query(Documento).filter(Documento.id == doc_id).first()
         if not doc or not doc.ruta_archivo_original:
             raise HTTPException(status_code=404, detail="Documento no encontrado")
-        file_path = Path(doc.ruta_archivo_original)
+        file_path = Path(doc.ruta_archivo_original).resolve()
+        # Validar que el archivo esté dentro de UPLOADS_DIR (anti path-traversal)
+        if not validate_path_within(file_path, UPLOADS_DIR):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         filename = file_path.name
@@ -1471,17 +1627,39 @@ def _save_agents(agents):
 
 @app.get("/api/agents")
 async def get_agents():
-    """Retorna la configuración de todos los agentes."""
-    return {"agents": _load_agents()}
+    """Retorna la configuración de todos los agentes (oculta cláusulas internas de seguridad)."""
+    from security import SECURITY_CLAUSE
+    agents = _load_agents()
+    # Ocultar las cláusulas de seguridad internas del system_prompt en la respuesta
+    sanitized_agents = []
+    for a in agents:
+        agent_copy = dict(a)
+        if "system_prompt" in agent_copy and SECURITY_CLAUSE:
+            agent_copy["system_prompt"] = agent_copy["system_prompt"].replace(SECURITY_CLAUSE, "").strip()
+        sanitized_agents.append(agent_copy)
+    return {"agents": sanitized_agents}
+
+# Campos que un usuario puede modificar en la configuración de agentes
+_AGENT_EDITABLE_FIELDS = {"modelo", "prompt", "system_prompt", "parametros", "nombre", "descripcion"}
 
 @app.put("/api/agents/{agent_id}")
 async def update_agent(agent_id: str, config: dict):
-    """Actualiza la configuración de un agente."""
-    from fastapi import Body
+    """Actualiza la configuración de un agente (solo campos permitidos)."""
+    # Filtrar solo campos editables para evitar manipulación de id, tipo, etc.
+    safe_config = {k: v for k, v in config.items() if k in _AGENT_EDITABLE_FIELDS}
+    if not safe_config:
+        raise HTTPException(status_code=400, detail="No se proporcionaron campos válidos para actualizar")
+    
+    # Sanitizar system_prompt y prompt contra inyecciones
+    if "system_prompt" in safe_config:
+        safe_config["system_prompt"] = sanitize_user_input(str(safe_config["system_prompt"]))[:4096]
+    if "prompt" in safe_config:
+        safe_config["prompt"] = sanitize_user_input(str(safe_config["prompt"]))[:4096]
+    
     agents = _load_agents()
     for i, a in enumerate(agents):
         if a["id"] == agent_id:
-            agents[i].update(config)
+            agents[i].update(safe_config)
             agents[i]["id"] = agent_id  # Asegurar que el ID no cambie
             _save_agents(agents)
             # Si el modelo cambió, verificar disponibilidad y descargar automáticamente

@@ -4,7 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>CCS — Pyme Ledger AI | Clasificación de Gastos</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
+<script src="vendor/purify.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════
    DESIGN SYSTEM — Pyme Ledger AI (CCS Theme)
@@ -1933,7 +1934,7 @@ function obAsk(stepIdx) {
   const sugsEl = document.getElementById('obSugs');
   if (sugsEl) {
     sugsEl.innerHTML = step.suggestions.map(s =>
-      `<div class="ob-sug" onclick="obPickSug('${s.replace(/'/g, "\\'")}')">${s}</div>`
+      `<div class="ob-sug" onclick="obPickSug('${escHtml(s).replace(/'/g, "\\'")}')">&#36;{escHtml(s)}</div>`
     ).join('');
   }
   const input = document.getElementById('obInput');
@@ -1951,7 +1952,7 @@ function obAddMsg(text, type = 'bot') {
   div.className = `ob-msg ${type}`;
   div.innerHTML = `
     <div class="ob-avatar">${type === 'user' ? '👤' : '🤖'}</div>
-    <div class="ob-bubble">${text.replace(/\n/g, '<br>')}</div>
+    <div class="ob-bubble">${safeHtml(text.replace(/\n/g, '<br>'))}</div>
   `;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
@@ -2537,7 +2538,7 @@ function updateStep(stepId, status, data) {
         </div>`;
     }
   }
-  dataEl.innerHTML = extra;
+  dataEl.innerHTML = safeHtml(extra);
   document.getElementById(`pstep_${stepId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -3400,7 +3401,7 @@ async function openDocModal(docId) {
       <button class="btn btn-success" onclick="updateDocFromModal('${docId}')">✓ Aprobar</button>
     `;
   } catch(e) {
-    body.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${e.message}</div>`;
+    body.innerHTML = `<div style="color:var(--red);padding:20px">Error: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -3611,7 +3612,7 @@ async function renderRecomendaciones() {
     }).join('');
   } catch(e) {
     document.getElementById('mainContent').innerHTML =
-      `<div style="color:var(--red);padding:20px">Error: ${e.message}</div>`;
+      `<div style="color:var(--red);padding:20px">Error: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -3630,7 +3631,7 @@ async function renderAgentes() {
     _agentesData = d.agents || [];
     renderAgentesGrid();
   } catch(e) {
-    mc.innerHTML = `<div style="color:var(--red);padding:20px">Error cargando agentes: ${e.message}</div>`;
+    mc.innerHTML = `<div style="color:var(--red);padding:20px">Error cargando agentes: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -3883,7 +3884,7 @@ const GIROS_SUGERIDOS = [
 
 function setEmpAssist(msg) {
   const el = document.getElementById('empAssistText');
-  if (el) el.innerHTML = msg;
+  if (el) el.innerHTML = safeHtml(msg);
 }
 
 function onEmpRazonSocialInput(val) {
@@ -4068,7 +4069,7 @@ function showToast(msg, type = 'info') {
   const c = document.getElementById('toastContainer');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  t.innerHTML = `<span>${{ success: '✓', error: '✕', info: 'ℹ' }[type] || 'ℹ'}</span><span>${escHtml(msg)}</span>`;
+  t.innerHTML = `<span>${{ success: '✓', error: '✕', info: 'ℹ' }[type] || 'ℹ'}</span><span>${safeHtml(escHtml(msg))}</span>`;
   c.appendChild(t);
   setTimeout(() => t.remove(), 4000);
 }
@@ -4096,6 +4097,22 @@ function fieldLabel(k) {
 
 function escHtml(s) {
   return (String(s == null ? '' : s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Sanitiza HTML usando DOMPurify antes de asignarlo a innerHTML.
+ * Permite solo tags seguros para renderizar respuestas del LLM.
+ * Previene XSS desde respuestas del backend.
+ */
+function safeHtml(html) {
+  if (typeof DOMPurify !== 'undefined') {
+    return DOMPurify.sanitize(String(html || ''), {
+      ALLOWED_TAGS: ['b', 'strong', 'em', 'i', 'br', 'span', 'div', 'ul', 'ol', 'li', 'p', 'a', 'pre', 'code', 'table', 'tr', 'td', 'th', 'thead', 'tbody'],
+      ALLOWED_ATTR: ['style', 'class', 'href', 'target', 'rel'],
+      ALLOW_DATA_ATTR: false
+    });
+  }
+  return escHtml(html);
 }
 
 // Cerrar modales al hacer clic fuera
