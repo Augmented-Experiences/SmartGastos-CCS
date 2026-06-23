@@ -532,6 +532,70 @@ a:hover { text-decoration: underline; }
   font-size: 12px;
 }
 
+/* ── Expense Edit Form (Nuevo Gasto) ─────────────────────── */
+.expense-form { padding: 18px; }
+.expense-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.expense-form-grid .ef-full { grid-column: 1 / -1; }
+.ef-group {
+  display: flex; flex-direction: column;
+}
+.ef-label {
+  font-size: 10px; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .06em;
+  margin-bottom: 5px; font-weight: 600;
+}
+.ef-input {
+  width: 100%; background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text); padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ef-input:focus {
+  outline: none;
+  border-color: var(--ccs-azul);
+  box-shadow: 0 0 0 3px rgba(13,61,166,.12);
+}
+.ef-input.invalid {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.12);
+}
+.ef-input.valid {
+  border-color: var(--green);
+}
+.ef-error {
+  font-size: 10px; color: var(--red);
+  margin-top: 3px; min-height: 14px;
+}
+.ef-hint {
+  font-size: 10px; color: var(--text3);
+  margin-top: 3px;
+}
+.ef-select {
+  width: 100%; background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text); padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+.ef-detected {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9px; color: var(--ccs-azul-oscuro);
+  background: rgba(13,61,166,.08);
+  padding: 2px 7px; border-radius: 10px;
+  margin-left: 6px; font-weight: 500;
+}
+.ef-total-highlight {
+  background: rgba(13,61,166,.06);
+  border-color: var(--ccs-azul);
+  padding: 12px;
+}
+
 /* ── Doc Grid ───────────────────────────────────────────────── */
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
 .doc-card {
@@ -2376,28 +2440,28 @@ function renderNuevoGasto() {
           <div class="pipeline-steps" id="pipelineSteps"></div>
         </div>
 
-        <!-- Result -->
+        <!-- Result: Formulario editable de gasto -->
         <div class="result-wrap" id="resultWrap" style="display:none">
           <div class="result-head">
             <span style="font-size:24px">✅</span>
             <div>
               <div style="font-size:14px;font-weight:700">Documento Procesado</div>
-              <div style="font-size:11px;color:var(--text2)" id="resultSub">Revisa los datos extraídos</div>
+              <div style="font-size:11px;color:var(--text2)" id="resultSub">Revisa y edita los datos extraídos antes de guardar</div>
             </div>
+            <button class="btn btn-secondary btn-sm" style="margin-left:auto" id="btnVerDoc"
+              onclick="openDocModal(state.processingDoc&&state.processingDoc.doc_id)">
+              👁 Ver documento original
+            </button>
           </div>
-          <div class="result-body" id="resultBody"></div>
+          <div class="expense-form" id="expenseForm"></div>
           <div class="result-cat" id="resultCat"></div>
           <div class="result-actions">
             <div class="cat-row">
               <label>Categoría:</label>
               <select id="catSelect" class="form-select"></select>
             </div>
-            <button class="btn btn-success btn-lg" onclick="acceptDocument()">✓ Aceptar y Guardar</button>
+            <button class="btn btn-success btn-lg" onclick="validateAndAcceptDocument()">✓ Validar y Guardar</button>
             <button class="btn btn-secondary" onclick="resetUpload()">↩ Procesar otro</button>
-            <button class="btn btn-secondary btn-sm" id="btnVerDoc"
-              onclick="openDocModal(state.processingDoc&&state.processingDoc.doc_id)">
-              👁 Ver doc
-            </button>
           </div>
         </div>
       </div>
@@ -2545,47 +2609,100 @@ function updateStep(stepId, status, data) {
 function renderResultPanel(data) {
   const fields = data.fields || {};
   const cls = data.classification || {};
-  const fmt = n => n ? '$' + Number(n).toLocaleString('es-CL') : '—';
 
   document.getElementById('resultWrap').style.display = '';
   document.getElementById('resultSub').textContent =
-    `${data.ocr_words || 0} palabras extraídas · Procesado con IA local`;
+    `${data.ocr_words || 0} palabras extraídas · Revisa y corrige los campos antes de guardar`;
 
-  document.getElementById('resultBody').innerHTML = `
-    <div class="r-field">
-      <div class="r-label">Proveedor</div>
-      <div class="r-value ${!fields.proveedor ? 'empty' : ''}">${escHtml(fields.proveedor || 'No detectado')}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">RUT / RUC</div>
-      <div class="r-value ${!fields.rut_proveedor ? 'empty' : ''}">${escHtml(fields.rut_proveedor || 'No detectado')}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">Fecha Emisión</div>
-      <div class="r-value ${!fields.fecha_emision ? 'empty' : ''}">${escHtml(fields.fecha_emision || 'No detectado')}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">Folio / N°</div>
-      <div class="r-value ${!fields.folio ? 'empty' : ''}">${escHtml(fields.folio || 'No detectado')}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">Monto Neto</div>
-      <div class="r-value">${fmt(fields.monto_neto)}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">IVA</div>
-      <div class="r-value">${fmt(fields.iva)}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">Total</div>
-      <div class="r-value" style="color:var(--ccs-azul-oscuro);font-size:17px">${fmt(fields.monto_total)}</div>
-    </div>
-    <div class="r-field">
-      <div class="r-label">Tipo</div>
-      <div class="r-value">${escHtml(fields.tipo_documento || '—')}</div>
+  // ── Formulario editable con validación ──
+  const formEl = document.getElementById('expenseForm');
+  formEl.innerHTML = `
+    <div class="expense-form-grid">
+      <div class="ef-group">
+        <label class="ef-label">Proveedor / Razón Social ${fields.proveedor ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_proveedor" type="text"
+          value="${escHtml(fields.proveedor || '')}"
+          placeholder="Ej: Sodimac, Falabella..."
+          oninput="validateExpenseField('proveedor')" />
+        <div class="ef-error" id="ef_err_proveedor"></div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">RUT Proveedor ${fields.rut_proveedor ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_rut_proveedor" type="text"
+          value="${escHtml(fields.rut_proveedor || '')}"
+          placeholder="Ej: 76.123.456-7"
+          oninput="validateExpenseField('rut_proveedor')" />
+        <div class="ef-error" id="ef_err_rut_proveedor"></div>
+        <div class="ef-hint">Formato: XX.XXX.XXX-X o sin puntos</div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">Fecha Emisión ${fields.fecha_emision ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_fecha_emision" type="text"
+          value="${escHtml(fields.fecha_emision || '')}"
+          placeholder="DD/MM/AAAA o AAAA-MM-DD"
+          oninput="validateExpenseField('fecha_emision')" />
+        <div class="ef-error" id="ef_err_fecha_emision"></div>
+        <div class="ef-hint">Formatos: DD/MM/AAAA, DD-MM-AAAA, AAAA-MM-DD</div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">Folio / N° Documento ${fields.folio ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_folio" type="text"
+          value="${escHtml(fields.folio || '')}"
+          placeholder="Ej: 12345"
+          oninput="validateExpenseField('folio')" />
+        <div class="ef-error" id="ef_err_folio"></div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">Monto Neto ${fields.monto_neto ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_monto_neto" type="text"
+          value="${fields.monto_neto || ''}"
+          placeholder="Ej: 50000"
+          oninput="validateExpenseField('monto_neto'); autoCalcTotal()" />
+        <div class="ef-error" id="ef_err_monto_neto"></div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">IVA ${fields.iva ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_iva" type="text"
+          value="${fields.iva || ''}"
+          placeholder="Ej: 9500"
+          oninput="validateExpenseField('iva'); autoCalcTotal()" />
+        <div class="ef-error" id="ef_err_iva"></div>
+      </div>
+      <div class="ef-group ef-total-highlight">
+        <label class="ef-label">Monto Total ${fields.monto_total ? '<span class="ef-detected">🤖 IA</span>' : ''}</label>
+        <input class="ef-input" id="ef_monto_total" type="text"
+          value="${fields.monto_total || ''}"
+          placeholder="Ej: 59500"
+          style="font-size:16px;color:var(--ccs-azul-oscuro)"
+          oninput="validateExpenseField('monto_total')" />
+        <div class="ef-error" id="ef_err_monto_total"></div>
+        <div class="ef-hint" id="ef_calc_hint"></div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">Tipo Documento</label>
+        <select class="ef-select" id="ef_tipo_documento">
+          <option value="" ${!fields.tipo_documento ? 'selected' : ''}>— Seleccionar —</option>
+          <option value="FACTURA" ${(fields.tipo_documento||'').toUpperCase() === 'FACTURA' ? 'selected' : ''}>Factura</option>
+          <option value="BOLETA" ${(fields.tipo_documento||'').toUpperCase() === 'BOLETA' ? 'selected' : ''}>Boleta</option>
+          <option value="COMPROBANTE" ${(fields.tipo_documento||'').toUpperCase() === 'COMPROBANTE' ? 'selected' : ''}>Comprobante</option>
+          <option value="CARTOLA" ${(fields.tipo_documento||'').toUpperCase() === 'CARTOLA' ? 'selected' : ''}>Cartola</option>
+          <option value="OTRO" ${(fields.tipo_documento||'').toUpperCase() === 'OTRO' ? 'selected' : ''}>Otro</option>
+        </select>
+        <div class="ef-error" id="ef_err_tipo_documento"></div>
+      </div>
+      <div class="ef-group">
+        <label class="ef-label">Moneda</label>
+        <select class="ef-select" id="ef_moneda">
+          <option value="CLP" ${(!fields.moneda || fields.moneda === 'CLP') ? 'selected' : ''}>CLP (Peso Chileno)</option>
+          <option value="USD" ${fields.moneda === 'USD' ? 'selected' : ''}>USD (Dólar)</option>
+          <option value="EUR" ${fields.moneda === 'EUR' ? 'selected' : ''}>EUR (Euro)</option>
+          <option value="UF" ${fields.moneda === 'UF' ? 'selected' : ''}>UF</option>
+        </select>
+      </div>
     </div>
   `;
 
+  // ── Categoría sugerida por IA ──
   const conf = Math.round((cls.confianza || 0) * 100);
   const confCls = conf >= 70 ? 'high' : conf >= 40 ? 'med' : 'low';
   document.getElementById('resultCat').innerHTML = `
@@ -2605,6 +2722,7 @@ function renderResultPanel(data) {
     </div>
   `;
 
+  // ── Selector de categoría ──
   const sel = document.getElementById('catSelect');
   sel.innerHTML = `<option value="">Sin categoría</option>` +
     state.categorias.map(c =>
@@ -2615,7 +2733,201 @@ function renderResultPanel(data) {
   if (state.assistantOpen) {
     const total = fields.monto_total ? '$' + Number(fields.monto_total).toLocaleString('es-CL') : 'desconocido';
     const prov = fields.proveedor || 'proveedor desconocido';
-    addAsstMsg(`✅ Documento procesado!\n\nProveedor: ${prov}\nTotal: ${total}\nCategoría sugerida: ${cls.categoria_sugerida || 'Sin categoría'}\n\n¿Deseas aceptar la clasificación o cambiarla?`, 'success');
+    addAsstMsg(`✅ Documento procesado!\n\nProveedor: ${prov}\nTotal: ${total}\nCategoría sugerida: ${cls.categoria_sugerida || 'Sin categoría'}\n\nRevisa los campos y haz clic en "Validar y Guardar".`, 'success');
+  }
+}
+
+// ── Validación de campos del formulario de gasto ──
+const EXPENSE_VALIDATORS = {
+  proveedor: (v) => {
+    if (!v) return ''; // Opcional
+    if (v.length < 2) return 'Mínimo 2 caracteres';
+    if (v.length > 200) return 'Máximo 200 caracteres';
+    return '';
+  },
+  rut_proveedor: (v) => {
+    if (!v) return ''; // Opcional
+    // Aceptar formatos: XX.XXX.XXX-X, XXXXXXXX-X, sin guión
+    const cleaned = v.replace(/[.\s]/g, '');
+    if (!/^\d{7,9}-?[\dkK]$/i.test(cleaned) && !/^\d{7,9}$/i.test(cleaned)) {
+      return 'Formato inválido. Ej: 76.123.456-7';
+    }
+    return '';
+  },
+  fecha_emision: (v) => {
+    if (!v) return ''; // Opcional
+    // Aceptar: DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD
+    const patterns = [
+      /^\d{2}[\/\-]\d{2}[\/\-]\d{4}$/,
+      /^\d{4}-\d{2}-\d{2}$/
+    ];
+    if (!patterns.some(p => p.test(v.trim()))) {
+      return 'Formato inválido. Use DD/MM/AAAA o AAAA-MM-DD';
+    }
+    // Validar que sea una fecha real
+    const parts = v.includes('/') ? v.split('/') : v.split('-');
+    let day, month, year;
+    if (parts[0].length === 4) { year = +parts[0]; month = +parts[1]; day = +parts[2]; }
+    else { day = +parts[0]; month = +parts[1]; year = +parts[2]; }
+    if (month < 1 || month > 12) return 'Mes inválido';
+    if (day < 1 || day > 31) return 'Día inválido';
+    if (year < 2000 || year > 2100) return 'Año fuera de rango (2000-2100)';
+    return '';
+  },
+  folio: (v) => {
+    if (!v) return ''; // Opcional
+    if (v.length > 50) return 'Máximo 50 caracteres';
+    return '';
+  },
+  monto_neto: (v) => {
+    if (!v) return ''; // Opcional
+    const cleaned = String(v).replace(/[^\d.,\-]/g, '').replace(',', '.');
+    const num = parseFloat(cleaned);
+    if (isNaN(num)) return 'Ingrese un número válido';
+    if (num < 0) return 'El monto no puede ser negativo';
+    if (num > 999999999) return 'Monto excesivamente alto';
+    return '';
+  },
+  iva: (v) => {
+    if (!v) return ''; // Opcional
+    const cleaned = String(v).replace(/[^\d.,\-]/g, '').replace(',', '.');
+    const num = parseFloat(cleaned);
+    if (isNaN(num)) return 'Ingrese un número válido';
+    if (num < 0) return 'El IVA no puede ser negativo';
+    if (num > 999999999) return 'Monto excesivamente alto';
+    return '';
+  },
+  monto_total: (v) => {
+    if (!v) return 'El monto total es obligatorio';
+    const cleaned = String(v).replace(/[^\d.,\-]/g, '').replace(',', '.');
+    const num = parseFloat(cleaned);
+    if (isNaN(num)) return 'Ingrese un número válido';
+    if (num <= 0) return 'El monto total debe ser mayor a 0';
+    if (num > 999999999) return 'Monto excesivamente alto';
+    return '';
+  },
+  tipo_documento: (v) => {
+    return ''; // Siempre válido (es un select)
+  }
+};
+
+function validateExpenseField(fieldKey) {
+  const input = document.getElementById(`ef_${fieldKey}`);
+  const errEl = document.getElementById(`ef_err_${fieldKey}`);
+  if (!input) return true;
+  const val = input.value.trim();
+  const validator = EXPENSE_VALIDATORS[fieldKey];
+  const error = validator ? validator(val) : '';
+  if (errEl) errEl.textContent = error;
+  input.classList.toggle('invalid', !!error);
+  input.classList.toggle('valid', !error && !!val);
+  return !error;
+}
+
+function autoCalcTotal() {
+  const neto = parseFloat(String(document.getElementById('ef_monto_neto')?.value || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+  const iva = parseFloat(String(document.getElementById('ef_iva')?.value || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+  const totalInput = document.getElementById('ef_monto_total');
+  const hintEl = document.getElementById('ef_calc_hint');
+  if (neto > 0 && iva >= 0) {
+    const calc = neto + iva;
+    if (hintEl) hintEl.textContent = `Cálculo: $${neto.toLocaleString('es-CL')} + $${iva.toLocaleString('es-CL')} = $${calc.toLocaleString('es-CL')}`;
+    // Solo auto-completar si el total está vacío o es igual al cálculo anterior
+    const currentTotal = parseFloat(String(totalInput?.value || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+    if (!totalInput.value || currentTotal === 0) {
+      totalInput.value = calc;
+      validateExpenseField('monto_total');
+    }
+  } else {
+    if (hintEl) hintEl.textContent = '';
+  }
+}
+
+function validateAllExpenseFields() {
+  const fields = ['proveedor', 'rut_proveedor', 'fecha_emision', 'folio', 'monto_neto', 'iva', 'monto_total', 'tipo_documento'];
+  let allValid = true;
+  for (const f of fields) {
+    if (!validateExpenseField(f)) allValid = false;
+  }
+  // Validación cruzada: si hay neto e IVA, el total debería ser >= neto
+  const neto = parseFloat(String(document.getElementById('ef_monto_neto')?.value || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+  const total = parseFloat(String(document.getElementById('ef_monto_total')?.value || '0').replace(/[^\d.,]/g, '').replace(',', '.')) || 0;
+  if (neto > 0 && total > 0 && total < neto) {
+    const errEl = document.getElementById('ef_err_monto_total');
+    if (errEl) errEl.textContent = 'El total no puede ser menor al monto neto';
+    document.getElementById('ef_monto_total')?.classList.add('invalid');
+    allValid = false;
+  }
+  return allValid;
+}
+
+async function validateAndAcceptDocument() {
+  if (!state.processingDoc) return;
+
+  // Validar todos los campos
+  if (!validateAllExpenseFields()) {
+    showToast('Corrige los errores marcados en rojo antes de guardar', 'error');
+    // Scroll al primer error
+    const firstErr = document.querySelector('.ef-input.invalid');
+    if (firstErr) firstErr.focus();
+    return;
+  }
+
+  // Recoger valores del formulario
+  const proveedor = document.getElementById('ef_proveedor')?.value.trim() || null;
+  const rut_proveedor = document.getElementById('ef_rut_proveedor')?.value.trim() || null;
+  const fecha_emision = document.getElementById('ef_fecha_emision')?.value.trim() || null;
+  const folio = document.getElementById('ef_folio')?.value.trim() || null;
+  const monto_neto_raw = document.getElementById('ef_monto_neto')?.value.trim();
+  const iva_raw = document.getElementById('ef_iva')?.value.trim();
+  const monto_total_raw = document.getElementById('ef_monto_total')?.value.trim();
+  const tipo_documento = document.getElementById('ef_tipo_documento')?.value || null;
+  const moneda = document.getElementById('ef_moneda')?.value || 'CLP';
+  const catId = document.getElementById('catSelect')?.value || null;
+
+  const parseNum = (v) => {
+    if (!v) return null;
+    const cleaned = String(v).replace(/[^\d.,\-]/g, '').replace(',', '.');
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+  };
+
+  const payload = {
+    proveedor, rut_proveedor, fecha_emision, folio,
+    monto_neto: parseNum(monto_neto_raw),
+    iva: parseNum(iva_raw),
+    monto_total: parseNum(monto_total_raw),
+    tipo_documento, moneda,
+    categoria_id: catId,
+    estado_revision: 'REVISADO'
+  };
+
+  // Eliminar nulls para no sobreescribir datos existentes
+  Object.keys(payload).forEach(k => { if (payload[k] === null) delete payload[k]; });
+
+  try {
+    if (state.processingDoc.doc_id) {
+      const r = await fetch(
+        `${API}/api/empresas/${state.empresa.id}/documentos/${state.processingDoc.doc_id}`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || 'Error al guardar');
+      }
+    }
+    showToast('✅ Gasto guardado y aprobado correctamente', 'success');
+    if (state.assistantOpen) {
+      addAsstMsg('✅ Gasto aprobado y guardado con todos los campos editados.', 'success');
+    }
+    resetUpload();
+    showSection('documentos');
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
   }
 }
 
@@ -2698,30 +3010,8 @@ async function processFile(file) {
   };
 }
 
-async function acceptDocument() {
-  if (!state.processingDoc) return;
-  const catId = document.getElementById('catSelect')?.value;
-  try {
-    if (state.processingDoc.doc_id) {
-      await fetch(
-        `${API}/api/empresas/${state.empresa.id}/documentos/${state.processingDoc.doc_id}`,
-        {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ categoria_id: catId || null, estado_revision: 'REVISADO' }),
-        }
-      );
-    }
-    showToast('Documento guardado y aprobado', 'success');
-    if (state.assistantOpen) {
-      addAsstMsg('✅ Documento aprobado y guardado correctamente.', 'success');
-    }
-    resetUpload();
-    showSection('documentos');
-  } catch(e) {
-    showToast('Error: ' + e.message, 'error');
-  }
-}
+// acceptDocument() ha sido reemplazada por validateAndAcceptDocument()
+// que incluye validación completa de todos los campos antes de guardar.
 
 function resetUpload() {
   state.processingDoc = null;
