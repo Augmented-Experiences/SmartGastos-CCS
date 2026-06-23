@@ -334,11 +334,11 @@ class TestPydanticValidation(unittest.TestCase):
         self.assertEqual(r.status_code, 422)
 
     def test_empresa_invalid_moneda_rejected(self):
-        """Moneda con formato inválido debe ser rechazada."""
+        """Moneda con formato inválido (sin letras) debe ser rechazada."""
         r = self.client.post("/api/empresas", json={
             "razon_social": "Test Moneda",
             "rut": "12.345.678-9",
-            "moneda_base": "INVALID_CURRENCY"
+            "moneda_base": "123"
         })
         self.assertEqual(r.status_code, 422)
 

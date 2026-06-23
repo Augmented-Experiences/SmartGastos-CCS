@@ -2040,11 +2040,15 @@ function obSend() {
   // Guardar valor
   let fieldVal = val;
   if (step.field === 'moneda') {
-    // Extraer solo el código
-    fieldVal = val.split(' ')[0];
+    // Extraer solo el código ISO (3 letras) de textos como "CLP — Peso Chileno"
+    const match = val.match(/^([A-Za-z]{3})/);
+    fieldVal = match ? match[1].toUpperCase() : 'CLP';
   }
-  if (step.field === 'rut' && val.toLowerCase().includes('omitir')) {
-    fieldVal = '00.000.000-0';
+  if (step.field === 'rut') {
+    // Si el usuario escribe variantes de "omitir", usar RUT por defecto
+    if (val.toLowerCase().includes('omitir') || val.toLowerCase().includes('skip') || val === '-') {
+      fieldVal = '00.000.000-0';
+    }
   }
   obData[step.field] = fieldVal;
 

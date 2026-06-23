@@ -207,22 +207,34 @@ class EmpresaCreate(BaseModel):
     @classmethod
     def validate_rut(cls, v):
         """Valida formato básico de RUT chileno o identificador genérico."""
-        if v and v != "00.000.000-0":
-            # Acepta formatos: XX.XXX.XXX-X, XXXXXXXX-X, o genérico
-            cleaned = v.replace('.', '').replace('-', '').replace(' ', '')
-            if len(cleaned) < 7 or len(cleaned) > 12:
-                raise ValueError(f"RUT/identificador inválido: longitud incorrecta ({len(cleaned)} chars)")
-            if not _re.match(r'^[0-9A-Za-z]+$', cleaned):
-                raise ValueError("RUT/identificador contiene caracteres no válidos")
+        if not v:
+            return "00.000.000-0"
+        # Tolerar variantes de "omitir" que puede enviar el onboarding
+        lower = v.strip().lower()
+        if any(word in lower for word in ['omitir', 'skip', 'no tengo', 'después', 'despues']):
+            return "00.000.000-0"
+        if v == "00.000.000-0":
+            return v
+        # Acepta formatos: XX.XXX.XXX-X, XXXXXXXX-X, o genérico
+        cleaned = v.replace('.', '').replace('-', '').replace(' ', '')
+        if len(cleaned) < 7 or len(cleaned) > 12:
+            raise ValueError(f"RUT/identificador inválido: longitud incorrecta ({len(cleaned)} chars)")
+        if not _re.match(r'^[0-9A-Za-z]+$', cleaned):
+            raise ValueError("RUT/identificador contiene caracteres no válidos")
         return v
 
     @field_validator('moneda_base')
     @classmethod
     def validate_moneda(cls, v):
-        """Valida código de moneda (3 letras ISO 4217)."""
-        if v and not _re.match(r'^[A-Z]{3}$', v.upper()):
-            raise ValueError(f"Código de moneda inválido: {v}. Use formato ISO 4217 (ej: CLP, USD)")
-        return v.upper() if v else "CLP"
+        """Valida código de moneda (3 letras ISO 4217). Tolera texto extra."""
+        if not v:
+            return "CLP"
+        # Extraer las primeras 3 letras si viene texto extra (ej: "CLP — Peso Chileno")
+        cleaned = v.strip().split()[0] if v.strip() else v
+        match = _re.match(r'^([A-Za-z]{3})', cleaned)
+        if match:
+            return match.group(1).upper()
+        raise ValueError(f"Código de moneda inválido: {v}. Use formato ISO 4217 (ej: CLP, USD)")
 
     @field_validator('razon_social', 'nombre', 'nombre_fantasia', 'giro')
     @classmethod
