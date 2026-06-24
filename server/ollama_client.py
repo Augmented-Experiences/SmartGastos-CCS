@@ -30,7 +30,7 @@ TIMEOUT_CHAT = int(os.environ.get("OLLAMA_TIMEOUT_CHAT", "60"))
 
 # Tracking global de uso (protegido por lock para thread safety)
 _stats_lock = threading.Lock()
-_usage_stats = {
+_STATS_DEFAULT = {
     "total_calls": 0,
     "successful_calls": 0,
     "failed_calls": 0,
@@ -40,6 +40,39 @@ _usage_stats = {
     "avg_latency_ms": 0,
     "injection_attempts_blocked": 0
 }
+
+# Ruta del archivo de persistencia
+_DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data"))
+_STATS_FILE = os.path.join(_DATA_DIR, "usage_stats.json")
+
+
+def _load_stats_from_disk() -> Dict:
+    """Carga estadísticas desde disco si existen."""
+    try:
+        if os.path.exists(_STATS_FILE):
+            with open(_STATS_FILE, 'r') as f:
+                saved = json.load(f)
+            # Merge con defaults para campos nuevos
+            merged = dict(_STATS_DEFAULT)
+            merged.update(saved)
+            return merged
+    except (json.JSONDecodeError, IOError, OSError) as e:
+        logger.warning(f"No se pudieron cargar stats desde disco: {e}")
+    return dict(_STATS_DEFAULT)
+
+
+def _save_stats_to_disk():
+    """Persiste estadísticas a disco (llamar dentro del lock)."""
+    try:
+        os.makedirs(os.path.dirname(_STATS_FILE), exist_ok=True)
+        with open(_STATS_FILE, 'w') as f:
+            json.dump(_usage_stats, f, indent=2)
+    except (IOError, OSError) as e:
+        logger.warning(f"No se pudieron guardar stats en disco: {e}")
+
+
+# Inicializar desde disco
+_usage_stats = _load_stats_from_disk()
 
 # Estado de descarga de modelos (protegido por lock)
 _pull_lock = threading.Lock()
@@ -97,6 +130,7 @@ def call_ollama(
         if detect_injection_attempt(user_message):
             with _stats_lock:
                 _usage_stats["injection_attempts_blocked"] += 1
+                _save_stats_to_disk()
             logger.warning(f"Intento de inyección detectado y neutralizado")
         user_message = sanitize_user_input(user_message)
 
@@ -123,6 +157,7 @@ def call_ollama(
     start_time = time.time()
     with _stats_lock:
         _usage_stats["total_calls"] += 1
+        _save_stats_to_disk()
 
     try:
         resp = requests.post(
@@ -137,6 +172,7 @@ def call_ollama(
             _start_pull_background(model)
             with _stats_lock:
                 _usage_stats["failed_calls"] += 1
+                _save_stats_to_disk()
             raise Exception(f"Modelo {model} no disponible. Descarga iniciada automáticamente.")
 
         resp.raise_for_status()
@@ -160,12 +196,14 @@ def call_ollama(
             _usage_stats["avg_latency_ms"] = int(
                 (_usage_stats["avg_latency_ms"] * (n - 1) + elapsed_ms) / n
             )
+            _save_stats_to_disk()
 
         return content
 
     except Exception as e:
         with _stats_lock:
             _usage_stats["failed_calls"] += 1
+            _save_stats_to_disk()
         logger.error(f"Error en call_ollama: {e}")
         raise
 
@@ -201,6 +239,7 @@ def call_ollama_generate(
         if detect_injection_attempt(prompt):
             with _stats_lock:
                 _usage_stats["injection_attempts_blocked"] += 1
+                _save_stats_to_disk()
             logger.warning(f"Intento de inyección detectado en generate")
         prompt = sanitize_user_input(prompt)
 
@@ -227,6 +266,7 @@ def call_ollama_generate(
 
     with _stats_lock:
         _usage_stats["total_calls"] += 1
+        _save_stats_to_disk()
     start_time = time.time()
 
     try:
@@ -237,6 +277,7 @@ def call_ollama_generate(
             _start_pull_background(model)
             with _stats_lock:
                 _usage_stats["failed_calls"] += 1
+                _save_stats_to_disk()
             raise Exception(f"Modelo {model} no disponible. Descarga iniciada.")
 
         resp.raise_for_status()
@@ -249,6 +290,7 @@ def call_ollama_generate(
 
         with _stats_lock:
             _usage_stats["successful_calls"] += 1
+            _save_stats_to_disk()
         return {
             "ok": True,
             "response": clean_response,
@@ -259,6 +301,7 @@ def call_ollama_generate(
     except Exception as e:
         with _stats_lock:
             _usage_stats["failed_calls"] += 1
+            _save_stats_to_disk()
         logger.error(f"Error en call_ollama_generate: {e}")
         return {
             "ok": False,
