@@ -197,18 +197,20 @@ class EmpresaCreate(BaseModel):
     razon_social: Optional[str] = None
     nombre: Optional[str] = None          # alias de razon_social (enviado por la UI)
     nombre_fantasia: Optional[str] = None
-    rut: str = "00.000.000-0"
-    pais: str = "Chile"
-    moneda_base: str = "CLP"
+    rut: Optional[str] = "00.000.000-0"
+    pais: Optional[str] = "Chile"
+    moneda_base: Optional[str] = "CLP"
     regimen_tributario: Optional[str] = None
     giro: Optional[str] = None
 
-    @field_validator('rut')
+    @field_validator('rut', mode='before')
     @classmethod
     def validate_rut(cls, v):
         """Valida formato básico de RUT chileno o identificador genérico."""
-        if not v:
+        if v is None or v == '':
             return "00.000.000-0"
+        # Convertir a string si viene como número
+        v = str(v)
         # Tolerar variantes de "omitir" que puede enviar el onboarding
         lower = v.strip().lower()
         if any(word in lower for word in ['omitir', 'skip', 'no tengo', 'después', 'despues']):
@@ -223,11 +225,11 @@ class EmpresaCreate(BaseModel):
             raise ValueError("RUT/identificador contiene caracteres no válidos")
         return v
 
-    @field_validator('moneda_base')
+    @field_validator('moneda_base', mode='before')
     @classmethod
     def validate_moneda(cls, v):
         """Valida código de moneda (3 letras ISO 4217). Tolera texto extra."""
-        if not v:
+        if v is None or v == '':
             return "CLP"
         # Extraer las primeras 3 letras si viene texto extra (ej: "CLP — Peso Chileno")
         cleaned = v.strip().split()[0] if v.strip() else v
@@ -344,16 +346,44 @@ class DocumentoUpdate(BaseModel):
 
 @app.post("/api/empresas")
 async def create_empresa(empresa: EmpresaCreate):
-    """Crea una nueva empresa."""
+    """Crea una nueva empresa. Si el RUT ya existe, retorna la empresa existente."""
     db = SessionLocal()
     try:
-        empresa_id = str(uuid.uuid4())
         razon_social = empresa.get_razon_social()
+        rut = empresa.rut or "00.000.000-0"
+
+        # Verificar si ya existe una empresa con este RUT
+        existing = db.query(Empresa).filter(Empresa.rut == rut).first()
+        if existing:
+            # Actualizar datos si se proporcionan nuevos valores
+            updated = False
+            if razon_social and razon_social != "Empresa sin nombre" and existing.razon_social != razon_social:
+                existing.razon_social = razon_social
+                updated = True
+            if empresa.giro and not existing.regimen_tributario:
+                existing.regimen_tributario = empresa.giro
+                updated = True
+            if empresa.nombre_fantasia and not existing.nombre_fantasia:
+                existing.nombre_fantasia = empresa.nombre_fantasia
+                updated = True
+            if updated:
+                db.commit()
+            return {
+                "id": existing.id,
+                "razon_social": existing.razon_social,
+                "nombre": existing.razon_social,
+                "rut": existing.rut,
+                "giro": existing.regimen_tributario or empresa.giro,
+                "mensaje": "Empresa existente recuperada" if not updated else "Empresa actualizada"
+            }
+
+        # Crear nueva empresa
+        empresa_id = str(uuid.uuid4())
         new_empresa = Empresa(
             id=empresa_id,
             razon_social=razon_social,
             nombre_fantasia=empresa.nombre_fantasia or empresa.giro or razon_social,
-            rut=empresa.rut,
+            rut=rut,
             pais=empresa.pais,
             moneda_base=empresa.moneda_base,
             regimen_tributario=empresa.regimen_tributario or empresa.giro
@@ -365,7 +395,7 @@ async def create_empresa(empresa: EmpresaCreate):
             "id": empresa_id,
             "razon_social": razon_social,
             "nombre": razon_social,
-            "rut": empresa.rut,
+            "rut": rut,
             "giro": empresa.giro,
             "mensaje": "Empresa creada exitosamente"
         }
