@@ -1319,7 +1319,7 @@ a:hover { text-decoration: underline; }
         <div class="logo-sub">Clasificación de Gastos</div>
       </div>
     </div>
-    <div class="sidebar-emp" onclick="showSection('admin')">
+    <div class="sidebar-emp" onclick="showSection('empresa-activa')" title="Ver resumen de la empresa activa">
       <div class="emp-label">Empresa activa</div>
       <div class="emp-name" id="sidebarEmpName">Sin empresa</div>
       <div class="emp-rut" id="sidebarEmpRut">—</div>
@@ -1397,8 +1397,15 @@ a:hover { text-decoration: underline; }
     </div>
     <div class="asst-msgs" id="asstMsgs"></div>
     <div class="asst-input-area">
+      <div class="asst-quick-actions" aria-label="Acciones de Ledger AI" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
+        <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('create_company')">+ Empresa</button>
+        <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('create_category')">+ Categoría</button>
+        <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('lookup_expense')">Buscar gasto</button>
+        <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('sum_expenses')">Sumar gastos</button>
+      </div>
+      <div id="asstActionForm"></div>
       <div class="asst-input-row">
-        <input class="asst-input" id="asstInput" placeholder="Pregunta algo..." onkeydown="if(event.key==='Enter')sendAssistantMsg()"/>
+        <input class="asst-input" id="asstInput" placeholder="Pregunta algo sobre tus gastos..." onkeydown="if(event.key==='Enter')sendAssistantMsg()"/>
         <button class="btn btn-primary btn-sm" onclick="sendAssistantMsg()">↑</button>
       </div>
     </div>
@@ -1451,14 +1458,8 @@ a:hover { text-decoration: underline; }
         </div>
         <div class="form-group">
           <label class="form-label">País</label>
-          <select class="form-select" id="empPais" onchange="onEmpPaisChange(this.value)"
-            onfocus="setEmpAssist('Selecciona el país donde opera tu empresa. Esto determina el formato del RUT y la moneda predeterminada.')">
-            <option value="Chile">Chile</option>
-            <option value="Peru">Perú</option>
-            <option value="Mexico">México</option>
-            <option value="Colombia">Colombia</option>
-            <option value="Argentina">Argentina</option>
-          </select>
+          <input class="form-input" id="empPais" value="Chile" readonly aria-readonly="true"/>
+          <div class="ef-hint">Este plugin está configurado exclusivamente para Chile.</div>
         </div>
       </div>
 
@@ -1471,16 +1472,19 @@ a:hover { text-decoration: underline; }
         <div id="empGiroSuggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--radius-xs);z-index:100;max-height:180px;overflow-y:auto"></div>
       </div>
 
-      <div class="form-group">
-        <label class="form-label">Moneda Base</label>
-        <select class="form-select" id="empMoneda"
-          onfocus="setEmpAssist('La moneda base se usará para todos los reportes y totales. Puedes cambiarla después desde Administración.')">
-          <option value="CLP">CLP — Peso Chileno</option>
-          <option value="PEN">PEN — Sol Peruano</option>
-          <option value="MXN">MXN — Peso Mexicano</option>
-          <option value="USD">USD — Dólar</option>
-          <option value="ARS">ARS — Peso Argentino</option>
-        </select>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Moneda Base</label>
+          <input class="form-input" id="empMoneda" value="CLP — Peso Chileno" readonly aria-readonly="true"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Régimen tributario</label>
+          <select class="form-select" id="empRegimen">
+            <option value="ProPyme">ProPyme</option>
+            <option value="General">General</option>
+          </select>
+          <div class="ef-hint">Reglas operativas para revisión; no reemplazan asesoría tributaria.</div>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
@@ -1501,6 +1505,7 @@ let state = {
   categorias: [],
   documentos: [],
   currentSection: 'dashboard',
+  activeCompanyView: null,
   processingDoc: null,
   charts: {},
   assistantOpen: false,
@@ -1699,11 +1704,19 @@ function renderUsageStats(container, stats) {
       </div>
       <div class="usage-stat">
         <div class="stat-val">${((stats.total_input_tokens || 0) + (stats.total_output_tokens || 0)).toLocaleString()}</div>
-        <div class="stat-label">Tokens procesados</div>
+        <div class="stat-label">Tokens totales</div>
+      </div>
+      <div class="usage-stat">
+        <div class="stat-val">${(stats.total_input_tokens || 0).toLocaleString()} / ${(stats.total_output_tokens || 0).toLocaleString()}</div>
+        <div class="stat-label">Entrada / salida</div>
+      </div>
+      <div class="usage-stat">
+        <div class="stat-val">$${(stats.cloud_reference_cost_usd || stats.total_savings_usd || 0).toFixed(4)}</div>
+        <div class="stat-label">Costo cloud de referencia</div>
       </div>
       <div class="usage-stat">
         <div class="stat-val">$${(stats.total_savings_usd || 0).toFixed(4)}</div>
-        <div class="stat-label">Ahorro vs Cloud</div>
+        <div class="stat-label">Ahorro por IA local</div>
       </div>
       <div class="usage-stat">
         <div class="stat-val">${stats.avg_latency_ms || 0}ms</div>
@@ -1755,7 +1768,8 @@ function showSection(s) {
     analitica:       ['Analítica', 'Análisis profundo de gastos'],
     recomendaciones: ['Recomendaciones', 'Optimización de gastos con IA'],
     agentes:         ['Agentes IA', 'Configuración de prompts y parámetros de cada agente'],
-    admin:           ['Administración', 'Empresas y categorías contables'],
+    'empresa-activa':['Empresa activa', 'Resumen y cambio de contexto de trabajo'],
+    admin:           ['Administración', 'Empresas, categorías y reglas contables'],
   };
   const [t, sub] = titles[s] || ['', ''];
   document.getElementById('topbarTitle').textContent = t;
@@ -1767,6 +1781,7 @@ function showSection(s) {
     analitica:       renderAnalitica,
     recomendaciones: renderRecomendaciones,
     agentes:         renderAgentes,
+    'empresa-activa': renderEmpresaActiva,
     admin:           renderAdmin,
   };
   if (fns[s]) fns[s]();
@@ -1843,6 +1858,58 @@ function addAsstChart(chartData) {
       }
     });
   }, 100);
+}
+
+function showAssistantAction(action) {
+  var form = document.getElementById('asstActionForm');
+  if (!form) return;
+  if (action === 'create_company') {
+    form.innerHTML = '<div class="card" style="padding:9px;margin-bottom:8px">' +
+      '<label class="form-label" for="asstCompanyName">Razón social</label><input class="form-input" id="asstCompanyName" placeholder="Mi Empresa SpA"/>' +
+      '<label class="form-label" for="asstCompanyRut" style="margin-top:6px">RUT (opcional)</label><input class="form-input" id="asstCompanyRut" placeholder="77.194.706-9"/>' +
+      '<label class="form-label" for="asstCompanyGiro" style="margin-top:6px">Giro</label><input class="form-input" id="asstCompanyGiro" placeholder="Servicios profesionales"/>' +
+      '<label class="form-label" for="asstCompanyRegimen" style="margin-top:6px">Régimen</label><select class="form-select" id="asstCompanyRegimen"><option value="ProPyme">ProPyme</option><option value="General">General</option></select>' +
+      '<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="submitAssistantAction(\'create_company\')">Confirmar y crear</button></div>';
+  } else if (action === 'create_category') {
+    form.innerHTML = '<div class="card" style="padding:9px;margin-bottom:8px"><label class="form-label" for="asstCategoryName">Nombre de la categoría</label><input class="form-input" id="asstCategoryName" placeholder="Ej: Viajes y representación"/><label class="form-label" for="asstCategoryIva" style="margin-top:6px">Regla IVA</label><select class="form-select" id="asstCategoryIva"><option value="Recuperable">Recuperable</option><option value="No recuperable">No recuperable</option></select><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="submitAssistantAction(\'create_category\')">Confirmar y crear</button></div>';
+  } else {
+    var label = action === 'sum_expenses' ? 'Proveedor opcional para la suma' : 'Proveedor o texto a buscar';
+    var button = action === 'sum_expenses' ? 'Calcular suma' : 'Buscar gastos';
+    form.innerHTML = '<div class="card" style="padding:9px;margin-bottom:8px"><label class="form-label" for="asstExpenseProvider">' + label + '</label><input class="form-input" id="asstExpenseProvider" placeholder="Ej: Uber, Sodimac"/><button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="submitAssistantAction(\'' + action + '\')">' + button + '</button></div>';
+  }
+}
+
+async function submitAssistantAction(action) {
+  var payload = { confirm: true };
+  if (action === 'create_company') {
+    payload.razon_social = document.getElementById('asstCompanyName')?.value.trim() || '';
+    payload.rut = document.getElementById('asstCompanyRut')?.value.trim() || null;
+    payload.giro = document.getElementById('asstCompanyGiro')?.value.trim() || '';
+    payload.regimen_tributario = document.getElementById('asstCompanyRegimen')?.value || 'ProPyme';
+    payload.pais = 'Chile'; payload.moneda_base = 'CLP';
+    if (!payload.razon_social) { showToast('Indica la razón social', 'error'); return; }
+  } else if (action === 'create_category') {
+    payload.nombre = document.getElementById('asstCategoryName')?.value.trim() || '';
+    payload.regla_iva = document.getElementById('asstCategoryIva')?.value || 'Recuperable';
+    if (!payload.nombre) { showToast('Indica un nombre de categoría', 'error'); return; }
+  } else {
+    payload.proveedor = document.getElementById('asstExpenseProvider')?.value.trim() || '';
+  }
+  try {
+    var response = await fetch(`${API}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: '', empresa_id: state.empresa?.id || null, action: action, payload: payload }) });
+    var data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.detail || 'No se pudo completar la acción');
+    addAsstMsg(data.response?.text || 'Acción completada.', 'success');
+    document.getElementById('asstActionForm').innerHTML = '';
+    if (action === 'create_company') {
+      await loadEmpresas();
+      state.empresa = state.empresas.find(function(e) { return e.id === data.response?.data?.id; }) || state.empresas[0];
+      updateSidebarEmpresa(); await loadCategorias();
+    }
+    if (action === 'create_category') { await loadCategorias(); }
+    if (state.currentSection === 'admin') renderAdmin();
+    if (state.currentSection === 'empresa-activa') renderEmpresaActiva();
+  } catch (e) { addAsstMsg('No pude completar la acción: ' + e.message, 'error'); }
 }
 
 async function sendAssistantMsg() {
@@ -1930,18 +1997,11 @@ const OB_STEPS = [
     field: 'giro',
   },
   {
-    id: 'pais',
-    question: '¿En qué país opera {razon_social}?',
-    placeholder: 'Chile, Perú, México...',
-    suggestions: ['Chile', 'Perú', 'México', 'Colombia', 'Argentina'],
-    field: 'pais',
-  },
-  {
-    id: 'moneda',
-    question: '¿Cuál es la moneda principal que usas?',
-    placeholder: 'CLP, USD, PEN...',
-    suggestions: ['CLP — Peso Chileno', 'USD — Dólar', 'PEN — Sol Peruano', 'MXN — Peso Mexicano'],
-    field: 'moneda',
+    id: 'regimen',
+    question: 'Ledger AI está configurado para Chile y todos los montos se registran en CLP. ¿Qué régimen operativo quieres usar para las recomendaciones?',
+    placeholder: 'ProPyme o General',
+    suggestions: ['ProPyme', 'General'],
+    field: 'regimen_tributario',
   },
   {
     id: 'cats',
@@ -2047,7 +2107,7 @@ function obSend() {
   if (step.field === 'rut') {
     // Si el usuario escribe variantes de "omitir", usar RUT por defecto
     if (val.toLowerCase().includes('omitir') || val.toLowerCase().includes('skip') || val === '-') {
-      fieldVal = '00.000.000-0';
+      fieldVal = null;
     }
   }
   obData[step.field] = fieldVal;
@@ -2057,8 +2117,7 @@ function obSend() {
     razon_social: `Perfecto, ${val}. 👍`,
     rut: val.toLowerCase().includes('omitir') ? 'Sin problema, puedes agregarlo después.' : `RUT registrado: ${val}`,
     giro: `Entendido. Configuraré las categorías para ${val}.`,
-    pais: `${val} registrado. 🌎`,
-    moneda: `Moneda base: ${fieldVal}. ✓`,
+    regimen_tributario: `Régimen operativo: ${fieldVal}. Las sugerencias tributarias siempre requerirán revisión humana.`,
     cats_choice: val.toLowerCase().includes('estándar') || val.toLowerCase().includes('estandar')
       ? 'Usaré las categorías estándar. ¡Perfecto!'
       : 'Puedes personalizar las categorías después en Administración.',
@@ -2105,10 +2164,11 @@ async function obFinish() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         razon_social: obData.razon_social || 'Mi Empresa',
-        rut: obData.rut || '00.000.000-0',
-        pais: obData.pais || 'Chile',
+        rut: obData.rut || null,
+        pais: 'Chile',
         giro: obData.giro || '',
-        moneda_base: obData.moneda || 'CLP',
+        moneda_base: 'CLP',
+        regimen_tributario: obData.regimen_tributario || 'ProPyme',
       })
     });
     const d = await r.json();
@@ -2284,7 +2344,7 @@ function renderKPIs(d) {
     <div class="kpi-card">
       <div class="kpi-label">Duplicados</div>
       <div class="kpi-value" style="color:var(--red)">${duplicados}</div>
-      <div class="kpi-sub">Detectados por IA</div>
+      <div class="kpi-sub">Bloqueados por hash o marcados en revisión</div>
     </div>
   `;
   const pb = document.getElementById('pendingBadge');
@@ -2414,12 +2474,12 @@ function renderNuevoGasto() {
             ondragleave="onDragLeave(event)"
             ondrop="onDrop(event)">
             <input type="file" id="fileInput"
-              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.webp"
+              accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.webp,.zip"
               onchange="onFileSelect(event)"/>
             <div class="upload-icon">☁️</div>
             <div class="upload-title">Arrastra tu documento aquí</div>
             <div class="upload-sub">
-              Facturas, boletas, recibos — PDF, JPG o PNG<br>
+              Facturas, boletas, recibos o un ZIP de documentos — PDF, JPG o PNG<br>
               <span style="color:var(--ccs-azul-oscuro)">El agente IA procesará todo automáticamente</span>
             </div>
             <div style="margin-top:16px">
@@ -2696,12 +2756,8 @@ function renderResultPanel(data) {
       </div>
       <div class="ef-group">
         <label class="ef-label">Moneda</label>
-        <select class="ef-select" id="ef_moneda">
-          <option value="CLP" ${(!fields.moneda || fields.moneda === 'CLP') ? 'selected' : ''}>CLP (Peso Chileno)</option>
-          <option value="USD" ${fields.moneda === 'USD' ? 'selected' : ''}>USD (Dólar)</option>
-          <option value="EUR" ${fields.moneda === 'EUR' ? 'selected' : ''}>EUR (Euro)</option>
-          <option value="UF" ${fields.moneda === 'UF' ? 'selected' : ''}>UF</option>
-        </select>
+        <input class="ef-input" id="ef_moneda" value="CLP (Peso Chileno)" readonly aria-readonly="true"/>
+        <div class="ef-hint">Este plugin registra documentos exclusivamente en CLP.</div>
       </div>
     </div>
   `;
@@ -2886,7 +2942,7 @@ async function validateAndAcceptDocument() {
   const iva_raw = document.getElementById('ef_iva')?.value.trim();
   const monto_total_raw = document.getElementById('ef_monto_total')?.value.trim();
   const tipo_documento = document.getElementById('ef_tipo_documento')?.value || null;
-  const moneda = document.getElementById('ef_moneda')?.value || 'CLP';
+  const moneda = 'CLP';
   const catId = document.getElementById('catSelect')?.value || null;
 
   const parseNum = (v) => {
@@ -2937,6 +2993,7 @@ async function validateAndAcceptDocument() {
 
 async function processFile(file) {
   if (!state.empresa) { showToast('Selecciona una empresa primero', 'error'); return; }
+  if ((file.name || '').toLowerCase().endsWith('.zip')) { processZip(file); return; }
   initPipelineUI(file.name);
 
   // Notificar al asistente
@@ -2955,6 +3012,15 @@ async function processFile(file) {
     });
     if (!r.ok) throw new Error(await r.text());
     uploadData = await r.json();
+    if (uploadData.status === 'duplicate' || uploadData.duplicate) {
+      document.getElementById('pipelineStatus').textContent = 'Duplicado bloqueado';
+      document.getElementById('pipelineStatus').className = 'ph-status error';
+      updateStep('audit', 'info', { message: uploadData.message, excepciones: [{ mensaje: uploadData.message }] });
+      showToast(uploadData.message || 'Esta factura ya existe.', 'error');
+      if (state.assistantOpen) addAsstMsg(uploadData.message || 'Factura duplicada bloqueada antes de procesarla.', 'error');
+      refreshDashboardData();
+      return;
+    }
   } catch(e) {
     showToast('Error subiendo archivo: ' + e.message, 'error');
     document.getElementById('pipelineStatus').textContent = 'Error al subir';
@@ -3014,6 +3080,46 @@ async function processFile(file) {
   };
 }
 
+async function processZip(file) {
+  if (!state.empresa) return;
+  initPipelineUI(file.name);
+  document.getElementById('pipelineStatus').textContent = 'Preparando lote ZIP...';
+  updateStep('save', 'running', { message: 'Validando archivos y preparando el procesamiento por lote...' });
+  var formData = new FormData();
+  formData.append('file', file);
+  try {
+    var response = await fetch(`${API}/api/empresas/${state.empresa.id}/documentos/import-zip`, { method: 'POST', body: formData });
+    var job = await response.json();
+    if (!response.ok) throw new Error(job.detail || 'No fue posible importar el ZIP');
+    if (state.assistantOpen) addAsstMsg('Procesando ZIP "' + file.name + '" con ' + job.total + ' archivo(s) compatible(s).', 'tip');
+    var poll = async function() {
+      var progressResponse = await fetch(`${API}/api/empresas/${state.empresa.id}/documentos/import-zip/${job.id}`);
+      var progress = await progressResponse.json();
+      document.getElementById('pipelineStatus').textContent = 'Lote: ' + progress.procesados + '/' + progress.total;
+      updateStep('save', progress.status === 'completed' ? 'done' : 'running', { message: 'Procesados ' + progress.procesados + ' de ' + progress.total + ' · ignorados: ' + (progress.ignorados || []).length });
+      if (progress.status !== 'completed') { setTimeout(poll, 1000); return; }
+      var processed = (progress.resultados || []).filter(function(item) { return item.estado === 'procesado'; }).length;
+      var duplicates = (progress.resultados || []).filter(function(item) { return item.estado === 'duplicado'; }).length;
+      var errors = (progress.resultados || []).filter(function(item) { return item.estado === 'error'; }).length;
+      document.getElementById('pipelineStatus').textContent = 'Lote completado';
+      document.getElementById('pipelineStatus').className = 'ph-status done';
+      document.getElementById('resultWrap').style.display = '';
+      document.getElementById('resultSub').textContent = 'Resumen de importación de ' + file.name;
+      document.getElementById('expenseForm').innerHTML = '<div class="card" style="padding:12px"><strong>Resultado del lote</strong><div style="margin-top:8px">Procesados: ' + processed + ' · Duplicados bloqueados: ' + duplicates + ' · Errores: ' + errors + ' · Ignorados: ' + (progress.ignorados || []).length + '</div><div style="margin-top:8px;font-size:11px;color:var(--text2)">' + (progress.resultados || []).map(function(item) { return escHtml(item.archivo + ': ' + item.estado); }).join('<br>') + '</div></div>';
+      document.getElementById('resultCat').innerHTML = '';
+      document.querySelector('.result-actions').innerHTML = '<button class="btn btn-primary" onclick="showSection(\'documentos\')">Ver documentos</button><button class="btn btn-secondary" onclick="resetUpload()">Importar otro ZIP</button>';
+      refreshDashboardData();
+      if (state.assistantOpen) addAsstMsg('ZIP completado: ' + processed + ' procesados, ' + duplicates + ' duplicados bloqueados y ' + errors + ' errores.', errors ? 'error' : 'success');
+    };
+    poll();
+  } catch (e) {
+    document.getElementById('pipelineStatus').textContent = 'Error en lote ZIP';
+    document.getElementById('pipelineStatus').className = 'ph-status error';
+    updateStep('save', 'error', { message: e.message });
+    showToast('Error importando ZIP: ' + e.message, 'error');
+  }
+}
+
 // acceptDocument() ha sido reemplazada por validateAndAcceptDocument()
 // que incluye validación completa de todos los campos antes de guardar.
 
@@ -3049,6 +3155,9 @@ function onFileSelect(e) {
 async function renderDocumentos() {
   if (!state.empresa) return;
   document.getElementById('mainContent').innerHTML = `
+    <div class="card" style="margin-bottom:12px;padding:12px;font-size:12px;line-height:1.5">
+      <strong>Estados de revisión:</strong> <strong>Pendiente</strong> requiere validar datos o clasificación; <strong>Aprobado</strong> fue revisado y se considera en reportes; <strong>Rechazado</strong> no debe considerarse; <strong>Duplicado</strong> identifica una carga repetida y se excluye de los totales. La etiqueta de categoría indica si el gasto ya está asignado o requiere clasificación.
+    </div>
     <div class="filters-bar">
       <input placeholder="🔍 Buscar proveedor, folio, categoría..."
         id="docSearch" oninput="filterDocs()"/>
@@ -3057,6 +3166,7 @@ async function renderDocumentos() {
         <div class="filter-tab" data-f="pendiente" onclick="setDocFilter('pendiente')">Pendientes</div>
         <div class="filter-tab" data-f="revisado" onclick="setDocFilter('revisado')">Aprobados</div>
         <div class="filter-tab" data-f="rechazado" onclick="setDocFilter('rechazado')">Rechazados</div>
+        <div class="filter-tab" data-f="duplicado" onclick="setDocFilter('duplicado')">Duplicados</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="showSection('nuevo-gasto')">➕ Nuevo</button>
     </div>
@@ -3140,7 +3250,7 @@ function renderDocGrid(docs) {
           <div class="doc-prov">${escHtml(doc.proveedor || 'Proveedor desconocido')}</div>
           <div class="doc-meta">${doc.fecha_emision ? doc.fecha_emision.split('T')[0] : 'Sin fecha'} · ${doc.folio || '—'}</div>
           ${doc.monto_total ? `<div class="doc-amount">$${Number(doc.monto_total).toLocaleString('es-CL')}</div>` : ''}
-          <span class="doc-cat">${escHtml(doc.categoria_nombre || 'Sin categoría')}</span>
+          <span class="doc-cat" title="${doc.categoria_nombre ? 'Categoría asignada' : 'Requiere clasificación'}">${escHtml(doc.categoria_nombre || 'Sin categoría')} · ${doc.categoria_nombre ? 'Asignada' : 'Por clasificar'}</span>
         </div>
       </div>`;
   }).join('');
@@ -3677,6 +3787,7 @@ async function openDocModal(docId) {
               <option value="REVISADO" ${doc.estado_revision && doc.estado_revision.toLowerCase() === 'revisado' ? 'selected' : ''}>Aprobado</option>
               <option value="RECHAZADO" ${doc.estado_revision && doc.estado_revision.toLowerCase() === 'rechazado' ? 'selected' : ''}>Rechazado</option>
             </select>
+            <div class="ef-hint">Pendiente: requiere revisión. Aprobado: validado. Rechazado: no se considera. Duplicado: carga repetida excluida de los totales.</div>
           </div>
           ${doc.excepciones && doc.excepciones.length > 0
             ? `<div class="dfr" style="border-color:var(--yellow)">
@@ -4097,6 +4208,13 @@ async function resetAgentes() {
 // ═══════════════════════════════════════════════════════════════
 // ADMINISTRACIÓN
 // ═══════════════════════════════════════════════════════════════
+async function renderEmpresaActiva() {
+  if (!state.empresa) { showOnboarding(); return; }
+  document.getElementById('mainContent').innerHTML = '<div class="card"><div class="card-title">🏢 Empresa activa</div><div id="activeCompanySummary">Cargando...</div></div>';
+  var summary = document.getElementById('activeCompanySummary');
+  summary.innerHTML = '<div style="display:grid;gap:8px"><div><strong>' + escHtml(state.empresa.razon_social) + '</strong></div><div style="color:var(--text2);font-size:12px">RUT: ' + escHtml(state.empresa.rut || 'No informado') + ' · Chile · CLP</div><div style="font-size:12px">Giro: ' + escHtml(state.empresa.giro || 'No informado') + ' · Régimen: ' + escHtml(state.empresa.regimen_tributario || 'ProPyme') + '</div><div style="margin-top:8px"><label class="form-label" for="activeCompanySelect">Cambiar empresa activa</label><select class="form-select" id="activeCompanySelect" onchange="selectEmpresa(this.value)">' + state.empresas.map(function(e) { return '<option value="' + e.id + '" ' + (e.id === state.empresa.id ? 'selected' : '') + '>' + escHtml(e.razon_social) + '</option>'; }).join('') + '</select></div><div style="color:var(--text3);font-size:11px;margin-top:8px">Para crear empresas, editar categorías o revisar reglas operativas, usa Administración.</div></div>';
+}
+
 async function renderAdmin() {
   document.getElementById('mainContent').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
@@ -4137,8 +4255,7 @@ async function renderAdmin() {
     <div style="display:flex;align-items:center;gap:7px;padding:7px 9px;
       background:var(--bg3);border:1px solid var(--border);
       border-radius:var(--radius-sm);margin-bottom:5px">
-      <span style="font-size:12px;flex:1">${escHtml(c.nombre)}</span>
-      <span style="font-size:9px;color:var(--text3)">${c.tipo_gasto || 'gasto'}</span>
+      <div style="flex:1"><div style="font-size:12px">${escHtml(c.nombre)}</div><div style="font-size:9px;color:var(--text3)">${escHtml(c.tipo_gasto || 'gasto')} · IVA: ${escHtml(c.regla_iva || 'Por revisar')} · Deducibilidad: ${escHtml(c.deducibilidad || 'Por revisar')}</div></div>
     </div>`).join('') || '<div style="color:var(--text3);font-size:12px">Sin categorías</div>';
 }
 
@@ -4275,7 +4392,8 @@ async function createEmpresa() {
         rut: document.getElementById('empRut').value.trim() || '00.000.000-0',
         pais: document.getElementById('empPais').value,
         giro: document.getElementById('empGiro').value.trim(),
-        moneda_base: document.getElementById('empMoneda').value,
+        moneda_base: 'CLP',
+        regimen_tributario: document.getElementById('empRegimen').value,
       })
     });
     const d = await r.json();
@@ -4371,7 +4489,7 @@ function showToast(msg, type = 'info') {
 function statusLabel(s) {
   if (!s) return 'Pendiente';
   const sl = s.toLowerCase();
-  return { pendiente: 'Pendiente', revisado: 'Aprobado', rechazado: 'Rechazado' }[sl] || s || 'Pendiente';
+  return { pendiente: 'Pendiente', revisado: 'Aprobado', rechazado: 'Rechazado', duplicado: 'Duplicado' }[sl] || s || 'Pendiente';
 }
 
 function fieldLabel(k) {

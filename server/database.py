@@ -74,8 +74,76 @@ def get_db_session():
         db.close()
 
 
+def _migrate_empresas_schema() -> None:
+    """Migra instalaciones antiguas sin un ORM externo de migraciones.
+
+    Las versiones previas usaban un RUT centinela compartido y una columna
+    ``rut NOT NULL``. SQLite no permite quitar esa restricción con ALTER TABLE,
+    por lo que se reconstruye exclusivamente la tabla de empresas, preservando
+    IDs y relaciones. El RUT centinela se convierte en NULL para que cada
+    empresa sin RUT conserve su identidad UUID propia.
+    """
+    with engine.begin() as connection:
+        rows = connection.exec_driver_sql("PRAGMA table_info(empresas)").mappings().all()
+        if not rows:
+            return
+        columns = {row["name"]: row for row in rows}
+        rut_is_required = bool(columns.get("rut", {}).get("notnull"))
+        giro_missing = "giro" not in columns
+        if not rut_is_required and not giro_missing:
+            return
+
+        has_giro = "giro" in columns
+        giro_expr = "giro" if has_giro else (
+            "CASE WHEN lower(COALESCE(regimen_tributario, '')) NOT IN "
+            "('propyme', 'pro pyme', 'general', 'régimen general', 'regimen general') "
+            "THEN regimen_tributario ELSE NULL END"
+        )
+        regimen_expr = (
+            "CASE WHEN lower(COALESCE(regimen_tributario, '')) IN "
+            "('general', 'régimen general', 'regimen general') THEN 'General' ELSE 'ProPyme' END"
+        )
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.exec_driver_sql("""
+            CREATE TABLE empresas__migrating (
+                id VARCHAR(36) PRIMARY KEY,
+                razon_social VARCHAR(255) NOT NULL,
+                nombre_fantasia VARCHAR(255),
+                rut VARCHAR(20) UNIQUE,
+                pais VARCHAR(50),
+                moneda_base VARCHAR(3),
+                regimen_tributario VARCHAR(50),
+                giro VARCHAR(255),
+                carpeta_raiz VARCHAR(500),
+                reglas_contables TEXT,
+                activa BOOLEAN,
+                fecha_creacion DATETIME,
+                fecha_actualizacion DATETIME
+            )
+        """)
+        connection.exec_driver_sql(f"""
+            INSERT INTO empresas__migrating (
+                id, razon_social, nombre_fantasia, rut, pais, moneda_base,
+                regimen_tributario, giro, carpeta_raiz, reglas_contables,
+                activa, fecha_creacion, fecha_actualizacion
+            )
+            SELECT id, razon_social, nombre_fantasia,
+                   CASE WHEN rut = '00.000.000-0' OR rut = '' THEN NULL ELSE rut END,
+                   COALESCE(pais, 'Chile'), COALESCE(moneda_base, 'CLP'),
+                   {regimen_expr}, {giro_expr}, carpeta_raiz, reglas_contables,
+                   activa, fecha_creacion, fecha_actualizacion
+            FROM empresas
+        """)
+        connection.exec_driver_sql("DROP TABLE empresas")
+        connection.exec_driver_sql("ALTER TABLE empresas__migrating RENAME TO empresas")
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        logger.info("Migración de empresas completada: RUT opcional y giro separado")
+
+
 def init_db():
-    """Inicializa la base de datos creando todas las tablas."""
+    """Inicializa las tablas y migra esquemas previos de forma idempotente."""
+    Base.metadata.create_all(bind=engine)
+    _migrate_empresas_schema()
     Base.metadata.create_all(bind=engine)
     logger.info(f"Base de datos inicializada en: {DB_PATH}")
     print(f"✅ Base de datos inicializada en: {DB_PATH}")

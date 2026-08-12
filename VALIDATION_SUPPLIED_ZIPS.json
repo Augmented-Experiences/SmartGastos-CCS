@@ -1,0 +1,237 @@
+{
+  "generado_en": "2026-08-12T01:09:46.959109Z",
+  "validaciones": [
+    {
+      "zip": "LlamaTalksTecWeek.zip",
+      "ok": true,
+      "empresa_id": "f9de6911-bc8d-479e-bc3e-e3d37a885eb0",
+      "estado": "completed",
+      "archivos_admitidos": 10,
+      "procesados": 10,
+      "duplicados": 0,
+      "errores": [],
+      "ignorados": [
+        {
+          "archivo": "Gastos-Llama-Talks-Tec-Week.xlsx",
+          "motivo": "formato no compatible"
+        }
+      ],
+      "resultados": [
+        {
+          "archivo": "comidas.pdf",
+          "estado": "procesado",
+          "documento_id": "191ef131-06d3-433a-87df-a1a4f3e215c6"
+        },
+        {
+          "archivo": "hotel-10-11-25.png",
+          "estado": "procesado",
+          "documento_id": "18c63169-392e-4d1b-bc2d-b9fc8f7e84f5"
+        },
+        {
+          "archivo": "Hotel 11-11-25.pdf",
+          "estado": "procesado",
+          "documento_id": "c55fbbed-3229-4f20-a1c8-9d6e4eb9b030"
+        },
+        {
+          "archivo": "Pasaje-SCL-CABA.pdf",
+          "estado": "procesado",
+          "documento_id": "fa5ca2d0-790d-46ec-ab06-dfd900452e7f"
+        },
+        {
+          "archivo": "Uber-12-11-25-aeropuerto-casa.pdf",
+          "estado": "procesado",
+          "documento_id": "726c99a7-5272-469b-b9ee-e2c87ba3f900"
+        },
+        {
+          "archivo": "Uber-10-11-25-AeropuertoAEP-Hotel.pdf",
+          "estado": "procesado",
+          "documento_id": "1a9b75a5-48c3-4452-b129-e14d50b0673b"
+        },
+        {
+          "archivo": "Uber-11-11-25-hotel-costa-salguero.pdf",
+          "estado": "procesado",
+          "documento_id": "a32a2c80-e23b-43b4-82c2-89dc3b71a6ce"
+        },
+        {
+          "archivo": "Uber-11-11-25-costa-salguero-hotel.pdf",
+          "estado": "procesado",
+          "documento_id": "b5be7448-73ad-4da0-9279-158b1ce851f9"
+        },
+        {
+          "archivo": "Uber-11-11-25-hotel-aeropuerto-caba.pdf",
+          "estado": "procesado",
+          "documento_id": "43ef52c4-77b2-4cae-b207-db6292114794"
+        },
+        {
+          "archivo": "aeropuerto-10-11-25-casa-aeropuerto.pdf",
+          "estado": "procesado",
+          "documento_id": "d258e1fc-b70c-4979-94b7-7f734d0efe36"
+        }
+      ]
+    },
+    {
+      "zip": "LLaMATechBuenosAires-ARSAT.zip",
+      "ok": true,
+      "empresa_id": "a911f9bd-68f0-41a9-937e-c7c779400a50",
+      "estado": "completed",
+      "archivos_admitidos": 6,
+      "procesados": 6,
+      "duplicados": 0,
+      "errores": [],
+      "ignorados": [
+        {
+          "archivo": "pasaje-despegar-SCL-CABA.eml",
+          "motivo": "formato no compatible"
+        },
+        {
+          "archivo": "Gastos-Tech-Talks-ARSAT.xlsx",
+          "motivo": "formato no compatible"
+        }
+      ],
+      "resultados": [
+        {
+          "archivo": "Hotel-CABA.pdf",
+          "estado": "procesado",
+          "documento_id": "1e83f0d9-011f-415d-b8fd-3852a7e4cca4"
+        },
+        {
+          "archivo": "Boleta_comida_BA.jpeg",
+          "estado": "procesado",
+          "documento_id": "efa794fc-4a1f-4f0f-8e6d-402b308b9387"
+        },
+        {
+          "archivo": "pasaje-latam-CABA-SCL.pdf",
+          "estado": "procesado",
+          "documento_id": "1cdb26dd-f5ac-4c18-aab3-0970293e8886"
+        },
+        {
+          "archivo": "Voucher_pago_comida_BA.jpeg",
+          "estado": "procesado",
+          "documento_id": "8d257ca6-755d-4708-af8c-757ee88a5429"
+        },
+        {
+          "archivo": "Uber_Hotel_Aeropuerto_BA.pdf",
+          "estado": "procesado",
+          "documento_id": "b9375175-045e-4a76-8ec6-0158a8c2eb8c"
+        },
+        {
+          "archivo": "Comprobante_Taxi_Aeropuerto_Hotel_BA.jpeg",
+          "estado": "procesado",
+          "documento_id": "0d23db5b-6bbb-417b-bcab-25b5e91ee7b1"
+        }
+      ]
+    },
+    {
+      "zip": "Montevideo2025.zip",
+      "ok": true,
+      "empresa_id": "0487f407-e283-4145-a8ac-af4f6ae8d670",
+      "estado": "completed",
+      "archivos_admitidos": 17,
+      "procesados": 17,
+      "duplicados": 0,
+      "errores": [],
+      "ignorados": [
+        {
+          "archivo": "FOTOS.zip",
+          "motivo": "formato no compatible"
+        },
+        {
+          "archivo": "Gastos a Rendir.xlsx",
+          "motivo": "formato no compatible"
+        },
+        {
+          "archivo": "rendicion-general-UY-PTY.xlsx",
+          "motivo": "formato no compatible"
+        }
+      ],
+      "resultados": [
+        {
+          "archivo": "Cena_18-8-2025.pdf",
+          "estado": "procesado",
+          "documento_id": "f9dd7a81-50b9-416c-8fbc-7886bbc14afe"
+        },
+        {
+          "archivo": "Uber_MVD_Hotel.pdf",
+          "estado": "procesado",
+          "documento_id": "807c033c-6730-4ae1-8ade-d1a29256004e"
+        },
+        {
+          "archivo": "Cena_19-8-2025.pdf",
+          "estado": "procesado",
+          "documento_id": "a0461983-fe80-4323-9e13-8804b0eca79c"
+        },
+        {
+          "archivo": "Cena_20-8-2025.pdf",
+          "estado": "procesado",
+          "documento_id": "4bff36b4-af5a-4754-bf41-8f822cfe2d86"
+        },
+        {
+          "archivo": "Cena_19-8-2025.jpg",
+          "estado": "procesado",
+          "documento_id": "63f1c6f1-d6fb-408d-a76d-9d0da52e1632"
+        },
+        {
+          "archivo": "Cena_20-8-2025.jpg",
+          "estado": "procesado",
+          "documento_id": "87e5af18-7b0a-4d15-aca9-011b4b4046a5"
+        },
+        {
+          "archivo": "Uber_SCL_Aeropuerto.pdf",
+          "estado": "procesado",
+          "documento_id": "8e344a29-d24f-438a-90dc-10cd2b8d67bf"
+        },
+        {
+          "archivo": "Booking.com_ Confirmación.pdf",
+          "estado": "procesado",
+          "documento_id": "a1db4362-1d45-4828-8667-89b91e6a00c7"
+        },
+        {
+          "archivo": "IMG-20250819-WA0014.jpg",
+          "estado": "procesado",
+          "documento_id": "3137fad6-26e2-4edc-bc31-82f6c3d9ba0b"
+        },
+        {
+          "archivo": "IMG-20250819-WA0015.jpg",
+          "estado": "procesado",
+          "documento_id": "c0fbc8bc-f8c2-46f4-a337-5ee523ef3e52"
+        },
+        {
+          "archivo": "IMG-20250819-WA0016.jpg",
+          "estado": "procesado",
+          "documento_id": "84e7f5c0-9820-454c-95bc-0d20ecce3ca6"
+        },
+        {
+          "archivo": "IMG-20250819-WA0017.jpg",
+          "estado": "procesado",
+          "documento_id": "567f18fc-9ed0-414b-8c41-be76023de940"
+        },
+        {
+          "archivo": "IMG-20250819-WA0018.jpg",
+          "estado": "procesado",
+          "documento_id": "475c5562-0423-4a55-a5b2-9f4de65f852b"
+        },
+        {
+          "archivo": "IMG-20250819-WA0019.jpg",
+          "estado": "procesado",
+          "documento_id": "99976605-a965-4305-b4cb-4e4d43e200dc"
+        },
+        {
+          "archivo": "IMG-20250819-WA0020.jpg",
+          "estado": "procesado",
+          "documento_id": "c75be29c-6661-4f08-b0da-b5b8f689b113"
+        },
+        {
+          "archivo": "factura-compra-pasaje-SCL-UY.pdf",
+          "estado": "procesado",
+          "documento_id": "6090924e-d102-4e0a-8c38-202c3232d42a"
+        },
+        {
+          "archivo": "pasaje-SCL-UY-Pablo-Alvarez-MetaDayUruguay.pdf",
+          "estado": "procesado",
+          "documento_id": "951767ef-324a-4c3a-9343-1a930fa58e4f"
+        }
+      ]
+    }
+  ],
+  "exito_total": true
+}

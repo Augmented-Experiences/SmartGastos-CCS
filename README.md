@@ -11,19 +11,20 @@
 ## Características Principales
 
 ### Ingesta Documental
-- Carga de documentos PDF, JPG y PNG mediante drag & drop
-- OCR automático con Tesseract y EasyOCR para documentos escaneados
-- Extracción de campos clave: proveedor, RUT, folio, fecha, montos, IVA
+- Carga individual de PDF, JPG, JPEG, PNG, BMP, TIFF y WEBP, o importación segura de lotes ZIP
+- OCR automático local con Tesseract y EasyOCR para documentos escaneados
+- Extracción de campos clave: proveedor, RUT, folio, fecha, montos e IVA
+- Detección SHA-256 de facturas duplicadas antes de consumir OCR o IA; los duplicados no se contabilizan dos veces
 
 ### Clasificación Inteligente
 - Clasificación automática por categoría contable (operaciones, marketing, impuestos, etc.)
 - Asignación a centros de costo
-- Detección de duplicados y anomalías
+- Detección de duplicados y anomalías locales con Isolation Forest y fallback estadístico robusto
 - Confianza de clasificación con indicador visual
 
 ### Revisión Asistida
-- Bandeja de documentos pendientes de revisión
-- Aprobación/rechazo con un clic
+- Bandeja con explicación de los estados **Pendiente**, **Aprobado**, **Rechazado** y **Duplicado**
+- Aprobación/rechazo con un clic y señalización de categoría asignada o pendiente
 - Corrección manual de categorías y centros de costo
 - Historial de revisiones
 
@@ -39,8 +40,8 @@
 - Libro contable en formato estándar
 
 ### Administración Maestra
-- Gestión de múltiples empresas
-- Configuración de categorías contables personalizadas
+- Gestión de múltiples empresas chilenas; el RUT es opcional y cada empresa sin RUT conserva su ID interno
+- Configuración de categorías contables personalizadas, con regla IVA y deducibilidad visibles
 - Centros de costo configurables
 - Reglas de clasificación por palabras clave
 
@@ -78,17 +79,20 @@ El instalador se encarga de:
 ### 1. Configurar Empresa
 1. Ir a **Administración → Empresas**
 2. Hacer clic en **Nueva Empresa**
-3. Ingresar razón social, RUT y moneda base
+3. Ingresar razón social, RUT opcional, giro y régimen **ProPyme** o **General**
+4. El plugin fija el país en **Chile** y la moneda base en **CLP**
 
 ### 2. Cargar Documentos
 1. Ir a **Ingesta**
-2. Arrastrar documentos al área de carga
-3. El sistema los procesa automáticamente
+2. Arrastrar documentos individuales o un archivo ZIP al área de carga
+3. El sistema procesa los soportes admitidos y enumera por separado los formatos no compatibles
+4. Si se carga una factura repetida, la aplicación la bloquea y la muestra como duplicado sin crear otro gasto
 
 ### 3. Revisar Clasificaciones
 1. Ir a **Revisión Asistida**
 2. Verificar las clasificaciones sugeridas por la IA
-3. Aprobar o corregir según corresponda
+3. Consultar la categoría y los indicadores de duplicidad, moneda y confianza
+4. Aprobar o corregir según corresponda; los documentos en moneda distinta de CLP quedan pendientes para validación humana
 
 ### 4. Analizar Gastos
 1. Ir a **Dashboard** o **Analítica**
@@ -117,9 +121,11 @@ pyme-ledger-ai/
 │   │   └── auditor_agent.py      # Validación y detección de anomalías
 │   ├── orchestration/
 │   │   └── pipeline.py           # Orquestador del pipeline de procesamiento
+│   ├── tax_rules.py              # Reglas operativas ProPyme/General, IVA y deducibilidad
 │   └── analytics/
 │       ├── analyzer.py           # Motor de analítica y KPIs
-│       ├── recommender.py        # Motor de recomendaciones
+│       ├── anomaly_detector.py   # Isolation Forest local + fallback MAD
+│       ├── recommender.py        # Motor de recomendaciones contextualizadas
 │       └── exporter.py           # Exportación CSV/PDF
 ├── app/
 │   └── index.html                # UI completa (HTML/CSS/JS)
@@ -147,7 +153,7 @@ pyme-ledger-ai/
 ## Privacidad y Seguridad
 
 - **100% offline**: ningún dato sale del equipo
-- **Sin telemetría**: no se envían datos a servidores externos
+- **Sin telemetría externa**: los contadores de tokens, latencia y ahorro frente a cloud se mantienen localmente
 - **Datos locales**: toda la información se almacena en SQLite en el directorio del plugin
 - **Código abierto**: todo el código es auditable
 

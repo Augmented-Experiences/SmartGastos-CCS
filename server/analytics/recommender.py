@@ -8,7 +8,8 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from sqlalchemy.orm import Session
 
-from models import Documento
+from models import Documento, Empresa
+from tax_rules import evaluate_document_tax_context, regime_profile
 
 
 class RecommendationEngine:
@@ -41,29 +42,34 @@ class RecommendationEngine:
             Documento.empresa_id == self.empresa_id,
             Documento.fecha_creacion >= start_date
         ).all()
-        
+        company = self.db.query(Empresa).filter(Empresa.id == self.empresa_id).first()
+        valid_docs = [d for d in docs if not self._is_duplicate_document(d)]
+
         recommendations = []
         
         # Recomendación 1: Consolidación de proveedores
-        consolidation_recs = self._recommend_provider_consolidation(docs)
+        consolidation_recs = self._recommend_provider_consolidation(valid_docs)
         recommendations.extend(consolidation_recs)
         
         # Recomendación 2: Gastos duplicados
-        duplicate_recs = self._recommend_duplicate_detection(docs)
+        duplicate_recs = self._recommend_duplicate_detection(valid_docs)
         recommendations.extend(duplicate_recs)
         
         # Recomendación 3: Suscripciones recurrentes
-        subscription_recs = self._recommend_subscription_review(docs)
+        subscription_recs = self._recommend_subscription_review(valid_docs)
         recommendations.extend(subscription_recs)
         
         # Recomendación 4: Categorías con mayor gasto
-        category_recs = self._recommend_category_optimization(docs)
+        category_recs = self._recommend_category_optimization(valid_docs)
         recommendations.extend(category_recs)
         
         # Recomendación 5: Proveedores con alza anómala
-        anomaly_recs = self._recommend_anomaly_investigation(docs)
+        anomaly_recs = self._recommend_anomaly_investigation(valid_docs)
         recommendations.extend(anomaly_recs)
-        
+
+        # Reglas tributarias operativas: régimen, giro, deducibilidad y regla IVA.
+        recommendations.extend(self._recommend_tax_context(valid_docs, company))
+
         # Ordenar por impacto potencial
         recommendations.sort(key=lambda x: x.get("impacto_potencial", 0), reverse=True)
         
@@ -72,9 +78,57 @@ class RecommendationEngine:
             "fecha_generacion": datetime.utcnow().isoformat(),
             "total_recomendaciones": len(recommendations),
             "ahorro_potencial_total": sum(r.get("ahorro_potencial", 0) for r in recommendations),
+            "contexto_empresa": {
+                "regimen": regime_profile(getattr(company, "regimen_tributario", None)) if company else regime_profile(None),
+                "giro": getattr(company, "giro", None) if company else None,
+                "moneda": "CLP",
+                "aviso": "Las recomendaciones tributarias son orientativas y requieren revisión humana con los respaldos.",
+            },
             "recomendaciones": recommendations
         }
     
+    @staticmethod
+    def _is_duplicate_document(doc: Documento) -> bool:
+        status = str(getattr(getattr(doc, "estado_revision", None), "value", getattr(doc, "estado_revision", "")) or "").lower()
+        if status == "duplicado":
+            return True
+        try:
+            exceptions = json.loads(doc.excepciones or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return any(isinstance(item, dict) and item.get("tipo") == "DUPLICADO" for item in exceptions)
+
+    def _recommend_tax_context(self, docs: list, company: Empresa | None) -> list:
+        """Agrupa señales de revisión generadas desde los campos contables reales."""
+        if not company:
+            return []
+        grouped = defaultdict(lambda: {"cantidad": 0, "monto": 0.0, "mensaje": "", "severidad": "BAJA"})
+        for doc in docs:
+            context = evaluate_document_tax_context(doc, company)
+            for signal in context["senales"]:
+                bucket = grouped[signal["codigo"]]
+                bucket["cantidad"] += 1
+                bucket["monto"] += float(doc.monto_total or 0)
+                bucket["mensaje"] = signal["mensaje"]
+                bucket["severidad"] = signal["severidad"]
+
+        recommendations = []
+        for code, data in grouped.items():
+            recommendations.append({
+                "tipo": code,
+                "severidad": data["severidad"],
+                "cantidad_documentos": data["cantidad"],
+                "monto_involucrado": round(data["monto"], 2),
+                "ahorro_potencial": 0.0,
+                "impacto_potencial": 0.0,
+                "mensaje": data["mensaje"],
+                "accion": "Revisar respaldos, giro y tratamiento con la persona responsable de contabilidad.",
+                "regimen": context["regimen"],
+                "giro": context["giro"],
+                "disclaimer": context["disclaimer"],
+            })
+        return recommendations
+
     def _recommend_provider_consolidation(self, docs: list) -> list:
         """Recomienda consolidación de proveedores similares."""
         recommendations = []

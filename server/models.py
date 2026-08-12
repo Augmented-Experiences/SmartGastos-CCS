@@ -18,10 +18,13 @@ class Empresa(Base):
     id = Column(String(36), primary_key=True)
     razon_social = Column(String(255), nullable=False)
     nombre_fantasia = Column(String(255))
-    rut = Column(String(20), unique=True, nullable=False)
+    # SQLite permite múltiples NULL en una columna única: las empresas sin RUT
+    # usan su UUID interno y nunca comparten un RUT centinela.
+    rut = Column(String(20), unique=True, nullable=True)
     pais = Column(String(50), default="Chile")
     moneda_base = Column(String(3), default="CLP")
-    regimen_tributario = Column(String(50))  # Ej: "Régimen Simplificado", "Régimen General"
+    regimen_tributario = Column(String(50), default="ProPyme")
+    giro = Column(String(255))
     carpeta_raiz = Column(String(500))  # Ruta a carpeta de documentos
     reglas_contables = Column(Text)  # JSON con reglas personalizadas
     activa = Column(Boolean, default=True)
@@ -145,6 +148,18 @@ class Documento(Base):
     empresa = relationship("Empresa", back_populates="documentos")
     categoria = relationship("CategoriaContable", back_populates="documentos")
     centro_costo = relationship("CentroCosto", back_populates="documentos")
+
+
+class DuplicateEvent(Base):
+    """Intento de carga duplicada bloqueado antes de contabilizar el gasto."""
+    __tablename__ = "duplicate_events"
+
+    id = Column(String(36), primary_key=True)
+    empresa_id = Column(String(36), ForeignKey("empresas.id"), nullable=False, index=True)
+    documento_original_id = Column(String(36), ForeignKey("documentos.id"), nullable=False)
+    hash_documento = Column(String(64), nullable=False, index=True)
+    nombre_archivo = Column(String(255))
+    fecha_creacion = Column(DateTime, default=datetime.utcnow)
 
 
 class AgentConfig(Base):

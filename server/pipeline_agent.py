@@ -40,6 +40,7 @@ import json
 import logging
 import os
 import re
+import math
 import subprocess
 import tempfile
 import uuid
@@ -1705,6 +1706,17 @@ class DocumentPipelineAgent:
                                      "mensaje": "Proveedor no detectado"})
                 requiere_revision = True
 
+            # El plugin opera exclusivamente en CLP. Si el documento señala otra
+            # moneda se conserva el campo extraído para trazabilidad, pero se exige
+            # revisión humana antes de aprobar sus montos como CLP.
+            detected_currency = str(ctx["fields"].get("moneda", "CLP") or "CLP").upper().strip()
+            if detected_currency not in {"CLP", "PESO CHILENO", "PESOS CHILENOS"}:
+                excepciones.append({
+                    "tipo": "MONEDA_NO_CLP",
+                    "mensaje": f"Documento detectado en {detected_currency}; conviértelo y valida los montos en CLP antes de aprobarlo."
+                })
+                requiere_revision = True
+
             # Verificar coherencia de montos
             monto_total = ctx["fields"].get("monto_total")
             monto_neto = ctx["fields"].get("monto_neto")
@@ -1948,14 +1960,29 @@ class DocumentPipelineAgent:
                 except Exception as e:
                     logger.debug(f"Excepción controlada: {e}")
 
-        # Montos
+        # Montos: se rechazan NaN e infinito antes de tocar la base de datos.
         def to_float(v) -> Optional[float]:
             if v is None:
                 return None
             try:
-                return float(str(v).replace(",", ".").replace(" ", ""))
-            except Exception:
+                parsed = float(str(v).replace(",", ".").replace(" ", ""))
+                return parsed if math.isfinite(parsed) else None
+            except (TypeError, ValueError):
                 return None
+
+        parsed_amounts = {
+            "monto_neto": to_float(fields.get("monto_neto")),
+            "iva": to_float(fields.get("iva")),
+            "monto_total": to_float(fields.get("monto_total")),
+        }
+        for field_name, parsed_value in parsed_amounts.items():
+            raw_value = fields.get(field_name)
+            if raw_value is not None and parsed_value is None:
+                audit.setdefault("excepciones", []).append({
+                    "tipo": "MONTO_INVALIDO",
+                    "mensaje": f"{field_name.replace('_', ' ')} no contiene un valor numérico finito; revísalo antes de aprobar."
+                })
+                audit["requiere_revision"] = True
 
         # Estado
         estado = (EstadoRevision.PENDIENTE
@@ -1975,10 +2002,10 @@ class DocumentPipelineAgent:
             rut_proveedor=fields.get("rut_proveedor"),
             fecha_emision=fecha_emision,
             folio=str(fields.get("folio", "")) if fields.get("folio") else None,
-            monto_neto=to_float(fields.get("monto_neto")),
-            iva=to_float(fields.get("iva")),
-            monto_total=to_float(fields.get("monto_total")),
-            moneda=str(fields.get("moneda", "CLP")),
+            monto_neto=parsed_amounts["monto_neto"],
+            iva=parsed_amounts["iva"],
+            monto_total=parsed_amounts["monto_total"],
+            moneda="CLP",
             categoria_id=classification.get("categoria_id"),
             categoria_sugerida=classification.get("categoria_sugerida"),
             confianza_clasificacion=float(classification.get("confianza", 0.0)),

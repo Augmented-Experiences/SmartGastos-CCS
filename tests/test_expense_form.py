@@ -253,11 +253,18 @@ class TestExpenseFieldValidation(unittest.TestCase):
         )
         self.assertIn(resp.status_code, [400, 422])
 
-    def test_update_moneda(self):
-        """Actualizar moneda."""
+    def test_reject_non_clp_currency(self):
+        """El plugin chileno rechaza monedas distintas de CLP."""
         resp = client.put(
             f"/api/empresas/{self.empresa_id}/documentos/{self.doc_id}",
             json={"moneda": "USD"}
+        )
+        self.assertIn(resp.status_code, [400, 422])
+
+    def test_accept_clp_currency(self):
+        resp = client.put(
+            f"/api/empresas/{self.empresa_id}/documentos/{self.doc_id}",
+            json={"moneda": "CLP"}
         )
         self.assertEqual(resp.status_code, 200)
 
@@ -364,10 +371,12 @@ class TestExpenseFormUI(unittest.TestCase):
         for tipo in ['FACTURA', 'BOLETA', 'COMPROBANTE', 'CARTOLA', 'OTRO']:
             self.assertIn(f'value="{tipo}"', self.html)
 
-    def test_moneda_options(self):
-        """El select de moneda debe tener opciones."""
-        for moneda in ['CLP', 'USD', 'EUR', 'UF']:
-            self.assertIn(f'value="{moneda}"', self.html)
+    def test_moneda_is_fixed_to_clp(self):
+        """La UI declara CLP y no expone opciones de monedas extranjeras."""
+        self.assertIn('CLP (Peso Chileno)', self.html)
+        self.assertNotIn('value="USD" ${fields.moneda', self.html)
+        self.assertNotIn('value="EUR" ${fields.moneda', self.html)
+        self.assertNotIn('value="UF" ${fields.moneda', self.html)
 
     def test_categoria_select_exists(self):
         """El selector de categoría debe existir."""

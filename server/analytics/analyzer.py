@@ -9,7 +9,8 @@ from collections import defaultdict
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from models import Documento, CategoriaContable, CentroCosto
+from models import Documento, CategoriaContable, CentroCosto, DuplicateEvent
+from .anomaly_detector import detect_expense_anomalies
 
 
 class AnalyticsEngine:
@@ -44,21 +45,29 @@ class AnalyticsEngine:
             Documento.fecha_creacion >= start_date
         ).all()
         
+        duplicate_attempts = self.db.query(DuplicateEvent).filter(
+            DuplicateEvent.empresa_id == self.empresa_id,
+            DuplicateEvent.fecha_creacion >= start_date
+        ).count()
         if not docs:
-            return self._get_empty_summary()
-        
-        # Cálculos básicos
-        total_gasto = sum(d.monto_total or 0 for d in docs)
-        total_iva = sum(d.iva or 0 for d in docs)
-        total_neto = sum(d.monto_neto or 0 for d in docs)
-        
-        # Documentos por estado
-        pending_review = len([d for d in docs if d.estado_revision.value == "Pendiente"])
-        reviewed = len([d for d in docs if d.estado_revision.value == "Revisado"])
-        duplicates = len([d for d in docs if d.estado_revision.value == "Duplicado"])
-        
-        # Promedio por documento
-        avg_gasto = total_gasto / len(docs) if docs else 0
+            empty = self._get_empty_summary()
+            empty["kpis"]["documentos_duplicados"] = duplicate_attempts
+            empty["kpis"]["intentos_duplicados_bloqueados"] = duplicate_attempts
+            return empty
+
+        duplicate_docs = [d for d in docs if self._is_duplicate_document(d)]
+        valid_docs = [d for d in docs if not self._is_duplicate_document(d)]
+        # Solo los documentos válidos afectan los montos contables y promedios.
+        total_gasto = sum(d.monto_total or 0 for d in valid_docs)
+        total_iva = sum(d.iva or 0 for d in valid_docs)
+        total_neto = sum(d.monto_neto or 0 for d in valid_docs)
+
+        pending_review = len([d for d in valid_docs if self._status_value(d) == "pendiente"])
+        reviewed = len([d for d in valid_docs if self._status_value(d) == "revisado"])
+        duplicates = len(duplicate_docs) + duplicate_attempts
+
+        # Promedio basado en gastos válidos, sin duplicados.
+        avg_gasto = total_gasto / len(valid_docs) if valid_docs else 0
         
         # Proveedor con mayor gasto
         top_provider = self._get_top_provider(docs)
@@ -74,14 +83,15 @@ class AnalyticsEngine:
                 "total_iva": round(total_iva, 2),
                 "total_neto": round(total_neto, 2),
                 "promedio_documento": round(avg_gasto, 2),
-                "cantidad_documentos": len(docs),
+                "cantidad_documentos": len(valid_docs),
                 "documentos_pendiente_revision": pending_review,
                 "documentos_revisados": reviewed,
-                "documentos_duplicados": duplicates
+                "documentos_duplicados": duplicates,
+                "intentos_duplicados_bloqueados": duplicate_attempts
             },
-            "top_provider": top_provider,
-            "top_category": top_category,
-            "tendencia": self._calculate_trend(docs)
+            "top_provider": self._get_top_provider(valid_docs),
+            "top_category": self._get_top_category(valid_docs),
+            "tendencia": self._calculate_trend(valid_docs)
         }
     
     def get_expenses_by_category(self, period_days: int = 30) -> Dict:
@@ -110,6 +120,8 @@ class AnalyticsEngine:
         })
         
         for doc in docs:
+            if self._is_duplicate_document(doc):
+                continue
             cat_name = doc.categoria.nombre if doc.categoria else "Sin categoría"
             categories_data[cat_name]["total"] += doc.monto_total or 0
             categories_data[cat_name]["iva"] += doc.iva or 0
@@ -177,6 +189,8 @@ class AnalyticsEngine:
         })
         
         for doc in docs:
+            if self._is_duplicate_document(doc):
+                continue
             prov_name = doc.proveedor or "Desconocido"
             providers_data[prov_name]["total"] += doc.monto_total or 0
             providers_data[prov_name]["cantidad"] += 1
@@ -234,6 +248,8 @@ class AnalyticsEngine:
         })
         
         for doc in docs:
+            if self._is_duplicate_document(doc):
+                continue
             cc_name = doc.centro_costo.nombre if doc.centro_costo else "Sin asignar"
             cost_centers_data[cc_name]["total"] += doc.monto_total or 0
             cost_centers_data[cc_name]["cantidad"] += 1
@@ -256,7 +272,7 @@ class AnalyticsEngine:
         result.sort(key=lambda x: x["total"], reverse=True)
         
         return {
-            "periodo_dias": period_dias,
+            "periodo_dias": period_days,
             "centros_costo": result
         }
     
@@ -285,6 +301,8 @@ class AnalyticsEngine:
         })
         
         for doc in docs:
+            if self._is_duplicate_document(doc):
+                continue
             if doc.fecha_emision:
                 month_key = doc.fecha_emision.strftime("%Y-%m")
             else:
@@ -331,9 +349,15 @@ class AnalyticsEngine:
         ).all()
         
         alerts = []
-        
-        # Alerta 1: Documentos sin clasificación
-        unclassified = [d for d in docs if not d.categoria_id]
+        duplicate_docs = [d for d in docs if self._is_duplicate_document(d)]
+        valid_docs = [d for d in docs if not self._is_duplicate_document(d)]
+        duplicate_attempts = self.db.query(DuplicateEvent).filter(
+            DuplicateEvent.empresa_id == self.empresa_id,
+            DuplicateEvent.fecha_creacion >= start_date
+        ).count()
+
+        # Alertas de calidad de datos; no se presentan como anomalías de IA.
+        unclassified = [d for d in valid_docs if not d.categoria_id]
         if unclassified:
             alerts.append({
                 "tipo": "SIN_CLASIFICACIÓN",
@@ -343,7 +367,7 @@ class AnalyticsEngine:
             })
         
         # Alerta 2: Documentos sin centro de costo
-        no_cost_center = [d for d in docs if not d.centro_costo_id]
+        no_cost_center = [d for d in valid_docs if not d.centro_costo_id]
         if no_cost_center:
             alerts.append({
                 "tipo": "SIN_CENTRO_COSTO",
@@ -353,7 +377,7 @@ class AnalyticsEngine:
             })
         
         # Alerta 3: Documentos con baja confianza
-        low_confidence = [d for d in docs if d.confianza_clasificacion < 0.6]
+        low_confidence = [d for d in valid_docs if (d.confianza_clasificacion or 0) < 0.6]
         if low_confidence:
             alerts.append({
                 "tipo": "BAJA_CONFIANZA",
@@ -362,33 +386,61 @@ class AnalyticsEngine:
                 "mensaje": f"{len(low_confidence)} documentos con confianza < 60%"
             })
         
-        # Alerta 4: Duplicados detectados
-        duplicates = [d for d in docs if d.estado_revision.value == "Duplicado"]
-        if duplicates:
+        # Duplicados persistidos e intentos bloqueados en carga.
+        duplicate_count = len(duplicate_docs) + duplicate_attempts
+        if duplicate_count:
             alerts.append({
                 "tipo": "DUPLICADOS",
                 "severidad": "ALTA",
-                "cantidad": len(duplicates),
-                "mensaje": f"{len(duplicates)} documentos duplicados detectados"
+                "cantidad": duplicate_count,
+                "mensaje": f"{duplicate_count} duplicados detectados o bloqueados antes de contabilizar",
+                "metodo": "hash_sha256"
             })
-        
-        # Alerta 5: Gastos anómalos
-        anomalies = [d for d in docs if d.excepciones]
-        if anomalies:
+
+        # Detección local de anomalías: Isolation Forest o fallback MAD para muestras pequeñas.
+        anomaly_map = detect_expense_anomalies(valid_docs)
+        ml_anomalies = []
+        for doc in valid_docs:
+            found = anomaly_map.get(str(doc.id))
+            if found:
+                ml_anomalies.append({
+                    "documento_id": doc.id,
+                    "proveedor": doc.proveedor or "Desconocido",
+                    "monto_total": round(float(doc.monto_total or 0), 2),
+                    **found,
+                })
+        if ml_anomalies:
             alerts.append({
-                "tipo": "GASTOS_ANÓMALOS",
-                "severidad": "MEDIA",
-                "cantidad": len(anomalies),
-                "mensaje": f"{len(anomalies)} documentos con excepciones detectadas"
+                "tipo": "GASTOS_ANOMALOS_IA_LOCAL",
+                "severidad": "ALTA" if any(a["score"] >= 0.75 for a in ml_anomalies) else "MEDIA",
+                "cantidad": len(ml_anomalies),
+                "mensaje": f"{len(ml_anomalies)} gastos atípicos detectados por análisis local",
+                "metodo": ", ".join(sorted({a["method"] for a in ml_anomalies}))
             })
-        
+
         return {
             "periodo_dias": period_days,
             "total_alertas": len(alerts),
-            "alertas": alerts
+            "alertas": alerts,
+            "anomalias": ml_anomalies,
+            "metodos_analisis": sorted({a["method"] for a in ml_anomalies})
         }
     
     # Métodos auxiliares
+
+    @staticmethod
+    def _status_value(document: Documento) -> str:
+        status = getattr(document, "estado_revision", None)
+        return str(getattr(status, "value", status) or "pendiente").lower()
+
+    def _is_duplicate_document(self, document: Documento) -> bool:
+        if self._status_value(document) == "duplicado":
+            return True
+        try:
+            exceptions = json.loads(document.excepciones or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return False
+        return any(isinstance(item, dict) and item.get("tipo") == "DUPLICADO" for item in exceptions)
     
     def _get_empty_summary(self) -> Dict:
         """Retorna resumen vacío."""
@@ -403,7 +455,8 @@ class AnalyticsEngine:
                 "cantidad_documentos": 0,
                 "documentos_pendiente_revision": 0,
                 "documentos_revisados": 0,
-                "documentos_duplicados": 0
+                "documentos_duplicados": 0,
+                "intentos_duplicados_bloqueados": 0
             },
             "top_provider": None,
             "top_category": None,
@@ -433,6 +486,8 @@ class AnalyticsEngine:
         
         categories = defaultdict(float)
         for doc in docs:
+            if self._is_duplicate_document(doc):
+                continue
             cat_name = doc.categoria.nombre if doc.categoria else "Sin categoría"
             categories[cat_name] += doc.monto_total or 0
         

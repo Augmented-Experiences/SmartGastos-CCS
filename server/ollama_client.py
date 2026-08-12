@@ -37,6 +37,9 @@ _STATS_DEFAULT = {
     "total_input_tokens": 0,
     "total_output_tokens": 0,
     "total_savings_usd": 0.0,
+    "cloud_reference_cost_usd": 0.0,
+    "local_inference_cost_usd": 0.0,
+    "cost_reference": "USD por tokens, referencia cloud equivalente (entrada US$3/M; salida US$11/M)",
     "avg_latency_ms": 0,
     "injection_attempts_blocked": 0
 }
@@ -83,6 +86,32 @@ def get_usage_stats() -> Dict:
     """Retorna estadísticas de uso del LLM (thread-safe)."""
     with _stats_lock:
         return dict(_usage_stats)
+
+
+def _record_successful_usage(start_time: float, response_data: Dict, input_text: str, output_text: str) -> None:
+    """Registra latencia, tokens y equivalente cloud para cualquier endpoint Ollama."""
+    from security import estimate_savings, COST_PER_1M_INPUT, COST_PER_1M_OUTPUT
+
+    fallback = estimate_savings(input_text, output_text)
+    prompt_tokens = response_data.get("prompt_eval_count")
+    output_tokens = response_data.get("eval_count")
+    input_tokens = int(prompt_tokens) if isinstance(prompt_tokens, int) and prompt_tokens >= 0 else fallback["input_tokens"]
+    generated_tokens = int(output_tokens) if isinstance(output_tokens, int) and output_tokens >= 0 else fallback["output_tokens"]
+    cloud_cost = (input_tokens / 1_000_000) * COST_PER_1M_INPUT + (generated_tokens / 1_000_000) * COST_PER_1M_OUTPUT
+    elapsed_ms = int((__import__("time").time() - start_time) * 1000)
+
+    with _stats_lock:
+        _usage_stats["successful_calls"] += 1
+        _usage_stats["total_input_tokens"] += input_tokens
+        _usage_stats["total_output_tokens"] += generated_tokens
+        _usage_stats["cloud_reference_cost_usd"] += cloud_cost
+        # La inferencia se realiza localmente; el ahorro representa el costo cloud evitado.
+        _usage_stats["total_savings_usd"] += cloud_cost
+        n = _usage_stats["successful_calls"]
+        _usage_stats["avg_latency_ms"] = int(
+            (_usage_stats["avg_latency_ms"] * (n - 1) + elapsed_ms) / n
+        )
+        _save_stats_to_disk()
 
 
 def call_ollama(
@@ -176,28 +205,14 @@ def call_ollama(
             raise Exception(f"Modelo {model} no disponible. Descarga iniciada automáticamente.")
 
         resp.raise_for_status()
-        content = resp.json()["message"]["content"]
+        response_data = resp.json()
+        content = response_data["message"]["content"]
 
         # Sanitizar respuesta
         content = sanitize_llm_response(content)
         content = fix_encoding(content)
 
-        # Tracking (thread-safe)
-        elapsed_ms = int((time.time() - start_time) * 1000)
-        with _stats_lock:
-            _usage_stats["successful_calls"] += 1
-            savings = estimate_savings(user_message, content)
-            _usage_stats["total_input_tokens"] += savings["input_tokens"]
-            _usage_stats["total_output_tokens"] += savings["output_tokens"]
-            _usage_stats["total_savings_usd"] += savings["savings_usd"]
-
-            # Promedio móvil de latencia
-            n = _usage_stats["successful_calls"]
-            _usage_stats["avg_latency_ms"] = int(
-                (_usage_stats["avg_latency_ms"] * (n - 1) + elapsed_ms) / n
-            )
-            _save_stats_to_disk()
-
+        _record_successful_usage(start_time, response_data, user_message, content)
         return content
 
     except Exception as e:
@@ -288,9 +303,7 @@ def call_ollama_generate(
         clean_response = sanitize_llm_response(raw_response)
         clean_response = fix_encoding(clean_response)
 
-        with _stats_lock:
-            _usage_stats["successful_calls"] += 1
-            _save_stats_to_disk()
+        _record_successful_usage(start_time, data, prompt, clean_response)
         return {
             "ok": True,
             "response": clean_response,

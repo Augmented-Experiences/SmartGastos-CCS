@@ -5,6 +5,9 @@ API FastAPI con endpoints para empresas, documentos, analítica y exportación.
 import os
 import json
 import uuid
+import hashlib
+import zipfile
+import threading
 import re as _re_mod
 from pathlib import Path
 from typing import List, Optional
@@ -25,7 +28,7 @@ OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434')
 # Importar módulos
 from database import init_db, get_db, SessionLocal, save_json, load_json
 from models import (
-    Empresa, CentroCosto, CategoriaContable, Documento, 
+    Empresa, CentroCosto, CategoriaContable, Documento, DuplicateEvent,
     TipoDocumento, EstadoRevision
 )
 from orchestration import DocumentProcessingPipeline
@@ -59,6 +62,10 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))
 PLUGIN_DIR = Path(os.environ.get("PLUGIN_DIR", str(BASE_DIR)))
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+BATCH_IMPORTS = {}
+_BATCH_IMPORTS_LOCK = threading.Lock()
+MAX_ZIP_ENTRIES = 300
+MAX_ZIP_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
 
 print(f"INFO: BASE_DIR  = {BASE_DIR}")
 print(f"INFO: DATA_DIR  = {DATA_DIR}")
@@ -110,6 +117,26 @@ async def _global_exception_handler(request, exc):
 # ============================================================
 _sanitize_filename = sanitize_filename
 _validate_path_within = validate_path_within
+
+
+def _has_expected_file_signature(path: Path, extension: str) -> bool:
+    """Verifica magic bytes mínimos cuando python-magic no está disponible."""
+    try:
+        with open(path, "rb") as source:
+            head = source.read(16)
+    except OSError:
+        return False
+    signatures = {
+        ".pdf": lambda data: data.startswith(b"%PDF-"),
+        ".jpg": lambda data: data.startswith(b"\xff\xd8\xff"),
+        ".jpeg": lambda data: data.startswith(b"\xff\xd8\xff"),
+        ".png": lambda data: data.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".bmp": lambda data: data.startswith(b"BM"),
+        ".tiff": lambda data: data.startswith((b"II*\x00", b"MM\x00*")),
+        ".webp": lambda data: len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP",
+    }
+    validator = signatures.get(extension)
+    return bool(validator and validator(head))
 
 
 # ============================================================
@@ -197,10 +224,11 @@ class EmpresaCreate(BaseModel):
     razon_social: Optional[str] = None
     nombre: Optional[str] = None          # alias de razon_social (enviado por la UI)
     nombre_fantasia: Optional[str] = None
-    rut: Optional[str] = "00.000.000-0"
-    pais: Optional[str] = "Chile"
-    moneda_base: Optional[str] = "CLP"
-    regimen_tributario: Optional[str] = None
+    # Un RUT ausente se persiste como NULL; nunca como un valor centinela compartido.
+    rut: Optional[str] = None
+    pais: str = "Chile"
+    moneda_base: str = "CLP"
+    regimen_tributario: str = "ProPyme"
     giro: Optional[str] = None
 
     @field_validator('rut', mode='before')
@@ -208,15 +236,13 @@ class EmpresaCreate(BaseModel):
     def validate_rut(cls, v):
         """Valida formato básico de RUT chileno o identificador genérico."""
         if v is None or v == '':
-            return "00.000.000-0"
+            return None
         # Convertir a string si viene como número
         v = str(v)
         # Tolerar variantes de "omitir" que puede enviar el onboarding
         lower = v.strip().lower()
         if any(word in lower for word in ['omitir', 'skip', 'no tengo', 'después', 'despues']):
-            return "00.000.000-0"
-        if v == "00.000.000-0":
-            return v
+            return None
         # Acepta formatos: XX.XXX.XXX-X, XXXXXXXX-X, o genérico
         cleaned = v.replace('.', '').replace('-', '').replace(' ', '')
         if len(cleaned) < 7 or len(cleaned) > 12:
@@ -225,18 +251,34 @@ class EmpresaCreate(BaseModel):
             raise ValueError("RUT/identificador contiene caracteres no válidos")
         return v
 
+    @field_validator('pais', mode='before')
+    @classmethod
+    def validate_pais(cls, v):
+        """El plugin está diseñado exclusivamente para empresas chilenas."""
+        if not v or str(v).strip().lower() == "chile":
+            return "Chile"
+        raise ValueError("Pyme Ledger AI opera exclusivamente para empresas de Chile.")
+
     @field_validator('moneda_base', mode='before')
     @classmethod
     def validate_moneda(cls, v):
-        """Valida código de moneda (3 letras ISO 4217). Tolera texto extra."""
-        if v is None or v == '':
+        """Fija CLP como moneda única para evitar conversiones tributarias ambiguas."""
+        if not v:
             return "CLP"
-        # Extraer las primeras 3 letras si viene texto extra (ej: "CLP — Peso Chileno")
-        cleaned = v.strip().split()[0] if v.strip() else v
-        match = _re.match(r'^([A-Za-z]{3})', cleaned)
-        if match:
-            return match.group(1).upper()
-        raise ValueError(f"Código de moneda inválido: {v}. Use formato ISO 4217 (ej: CLP, USD)")
+        cleaned = str(v).strip().split()[0].upper()
+        if cleaned == "CLP":
+            return "CLP"
+        raise ValueError("Pyme Ledger AI opera exclusivamente con moneda CLP.")
+
+    @field_validator('regimen_tributario', mode='before')
+    @classmethod
+    def validate_regimen(cls, v):
+        normalized = str(v or "ProPyme").strip().lower()
+        if "propyme" in normalized or "pro pyme" in normalized or "14 d" in normalized:
+            return "ProPyme"
+        if normalized in {"general", "régimen general", "regimen general"}:
+            return "General"
+        raise ValueError("Régimen tributario inválido. Use ProPyme o General.")
 
     @field_validator('razon_social', 'nombre', 'nombre_fantasia', 'giro')
     @classmethod
@@ -320,6 +362,15 @@ class DocumentoUpdate(BaseModel):
             raise ValueError("Los montos no pueden ser negativos")
         return v
 
+    @field_validator('moneda')
+    @classmethod
+    def validate_document_moneda(cls, v):
+        if v is None:
+            return v
+        if str(v).upper() != "CLP":
+            raise ValueError("Los documentos del plugin deben estar expresados en CLP.")
+        return "CLP"
+
     @field_validator('estado_revision')
     @classmethod
     def validate_estado(cls, v):
@@ -350,18 +401,22 @@ async def create_empresa(empresa: EmpresaCreate):
     db = SessionLocal()
     try:
         razon_social = empresa.get_razon_social()
-        rut = empresa.rut or "00.000.000-0"
+        rut = empresa.rut or None
 
-        # Verificar si ya existe una empresa con este RUT
-        existing = db.query(Empresa).filter(Empresa.rut == rut).first()
+        # Solo un RUT real permite recuperar una empresa existente. Sin RUT,
+        # cada alta recibe un UUID nuevo y jamás modifica otra PyME.
+        existing = db.query(Empresa).filter(Empresa.rut == rut).first() if rut else None
         if existing:
             # Actualizar datos si se proporcionan nuevos valores
             updated = False
             if razon_social and razon_social != "Empresa sin nombre" and existing.razon_social != razon_social:
                 existing.razon_social = razon_social
                 updated = True
-            if empresa.giro and not existing.regimen_tributario:
-                existing.regimen_tributario = empresa.giro
+            if empresa.giro and not existing.giro:
+                existing.giro = empresa.giro
+                updated = True
+            if empresa.regimen_tributario and existing.regimen_tributario != empresa.regimen_tributario:
+                existing.regimen_tributario = empresa.regimen_tributario
                 updated = True
             if empresa.nombre_fantasia and not existing.nombre_fantasia:
                 existing.nombre_fantasia = empresa.nombre_fantasia
@@ -373,8 +428,10 @@ async def create_empresa(empresa: EmpresaCreate):
                 "razon_social": existing.razon_social,
                 "nombre": existing.razon_social,
                 "rut": existing.rut,
-                "giro": existing.regimen_tributario or empresa.giro,
-                "mensaje": "Empresa existente recuperada" if not updated else "Empresa actualizada"
+                "giro": existing.giro,
+                "regimen_tributario": existing.regimen_tributario,
+                "mensaje": "Empresa existente recuperada" if not updated else "Empresa actualizada",
+                "created": False
             }
 
         # Crear nueva empresa
@@ -384,9 +441,10 @@ async def create_empresa(empresa: EmpresaCreate):
             razon_social=razon_social,
             nombre_fantasia=empresa.nombre_fantasia or empresa.giro or razon_social,
             rut=rut,
-            pais=empresa.pais,
-            moneda_base=empresa.moneda_base,
-            regimen_tributario=empresa.regimen_tributario or empresa.giro
+            pais="Chile",
+            moneda_base="CLP",
+            regimen_tributario=empresa.regimen_tributario,
+            giro=empresa.giro
         )
         db.add(new_empresa)
         db.commit()
@@ -397,7 +455,9 @@ async def create_empresa(empresa: EmpresaCreate):
             "nombre": razon_social,
             "rut": rut,
             "giro": empresa.giro,
-            "mensaje": "Empresa creada exitosamente"
+            "regimen_tributario": empresa.regimen_tributario,
+            "mensaje": "Empresa creada exitosamente",
+            "created": True
         }
     except Exception as e:
         db.rollback()
@@ -419,9 +479,10 @@ async def list_empresas():
                     "razon_social": e.razon_social,
                     "nombre_fantasia": e.nombre_fantasia,
                     "rut": e.rut,
-                    "giro": e.regimen_tributario,
-                    "pais": e.pais,
-                    "moneda_base": e.moneda_base
+                    "giro": e.giro,
+                    "pais": "Chile",
+                    "moneda_base": "CLP",
+                    "regimen_tributario": e.regimen_tributario
                 }
                 for e in empresas
             ]
@@ -444,9 +505,10 @@ async def get_empresa(empresa_id: str):
             "razon_social": empresa.razon_social,
             "nombre_fantasia": empresa.nombre_fantasia,
             "rut": empresa.rut,
-            "pais": empresa.pais,
-            "moneda_base": empresa.moneda_base,
+            "pais": "Chile",
+            "moneda_base": "CLP",
             "regimen_tributario": empresa.regimen_tributario,
+            "giro": empresa.giro,
             "fecha_creacion": empresa.fecha_creacion.isoformat()
         }
     finally:
@@ -562,7 +624,8 @@ async def list_categories(empresa_id: str):
                     "codigo": c.codigo,
                     "nombre": c.nombre,
                     "tipo_gasto": c.tipo_gasto,
-                    "deducibilidad": c.deducibilidad
+                    "deducibilidad": c.deducibilidad,
+                    "regla_iva": c.regla_iva
                 }
                 for c in categories
             ]
@@ -640,9 +703,46 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
                 status_code=400,
                 detail=f"Tipo de archivo no permitido: {detected_mime}"
             )
+        if not _has_expected_file_signature(file_path, file_extension):
+            file_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail="El contenido del archivo no coincide con el formato declarado."
+            )
+
+        # Calcular SHA-256 después de validar el contenido. La misma factura no
+        # debe consumir OCR/LLM ni generar un segundo gasto contabilizado.
+        file_hash = hashlib.sha256()
+        with open(str(file_path), "rb") as uploaded_file:
+            for chunk in iter(lambda: uploaded_file.read(1024 * 1024), b""):
+                file_hash.update(chunk)
+        digest = file_hash.hexdigest()
+        existing = db.query(Documento).filter(
+            Documento.empresa_id == empresa_id,
+            Documento.hash_documento == digest
+        ).first()
+        if existing:
+            duplicate_event = DuplicateEvent(
+                id=str(uuid.uuid4()),
+                empresa_id=empresa_id,
+                documento_original_id=existing.id,
+                hash_documento=digest,
+                nombre_archivo=original_name,
+            )
+            db.add(duplicate_event)
+            db.commit()
+            file_path.unlink(missing_ok=True)
+            return {
+                "status": "duplicate",
+                "duplicate": True,
+                "message": "Esta factura ya fue cargada; no se creó un gasto adicional.",
+                "documento_original_id": existing.id,
+                "duplicate_event_id": duplicate_event.id,
+                "original_filename": original_name,
+                "empresa_id": empresa_id,
+            }
 
         print(f"INFO: Archivo guardado → {file_path} ({total_size:,} bytes)")
-
         return {
             "status": "uploaded",
             "file_id": file_id,
@@ -650,6 +750,7 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
             "file_path": str(file_path),
             "original_filename": original_name,
             "size_bytes": total_size,
+            "hash_documento": digest,
             "empresa_id": empresa_id
         }
     except HTTPException:
@@ -658,6 +759,149 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+
+def _record_duplicate_event(db: Session, empresa_id: str, existing: Documento, digest: str, filename: str) -> str:
+    event = DuplicateEvent(
+        id=str(uuid.uuid4()), empresa_id=empresa_id,
+        documento_original_id=existing.id, hash_documento=digest,
+        nombre_archivo=filename,
+    )
+    db.add(event)
+    db.commit()
+    return event.id
+
+
+def _file_sha256(path: Path) -> str:
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def _run_batch_import(batch_id: str, empresa_id: str, files: list[dict]) -> None:
+    """Procesa soportes extraídos por ZIP con sesiones independientes y progreso persistente en memoria."""
+    with _BATCH_IMPORTS_LOCK:
+        BATCH_IMPORTS[batch_id]["status"] = "processing"
+    for item in files:
+        result = {"archivo": item["original_filename"], "estado": "error"}
+        db = SessionLocal()
+        try:
+            path = Path(item["path"])
+            digest = _file_sha256(path)
+            existing = db.query(Documento).filter(
+                Documento.empresa_id == empresa_id,
+                Documento.hash_documento == digest
+            ).first()
+            if existing:
+                event_id = _record_duplicate_event(db, empresa_id, existing, digest, item["original_filename"])
+                result = {"archivo": item["original_filename"], "estado": "duplicado", "documento_original_id": existing.id, "evento_id": event_id}
+            else:
+                agent = DocumentPipelineAgent(db, empresa_id, UPLOADS_DIR)
+                completed = None
+                for raw_event in agent.process_stream(str(path), item["original_filename"]):
+                    if raw_event.startswith("data: "):
+                        event = json.loads(raw_event[6:].strip())
+                        if event.get("step") == "complete":
+                            completed = event
+                if completed:
+                    result = {"archivo": item["original_filename"], "estado": "procesado", "documento_id": completed.get("doc_id")}
+                else:
+                    result = {"archivo": item["original_filename"], "estado": "error", "detalle": "El pipeline no emitió un resultado final."}
+        except Exception as exc:
+            db.rollback()
+            result = {"archivo": item["original_filename"], "estado": "error", "detalle": str(exc)[:300]}
+        finally:
+            db.close()
+        with _BATCH_IMPORTS_LOCK:
+            job = BATCH_IMPORTS[batch_id]
+            job["resultados"].append(result)
+            job["procesados"] += 1
+    with _BATCH_IMPORTS_LOCK:
+        job = BATCH_IMPORTS[batch_id]
+        job["status"] = "completed"
+        job["completado_en"] = datetime.utcnow().isoformat()
+
+
+@app.post("/api/empresas/{empresa_id}/documentos/import-zip", status_code=202)
+async def import_documents_zip(empresa_id: str, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Importa PDF e imágenes desde un ZIP sin extraer rutas inseguras ni archivos no admitidos."""
+    db = SessionLocal()
+    try:
+        if not db.query(Empresa).filter(Empresa.id == empresa_id).first():
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+        original_name = _sanitize_filename(file.filename or "lote.zip")
+        if Path(original_name).suffix.lower() != ".zip":
+            raise HTTPException(status_code=400, detail="Selecciona un archivo ZIP.")
+        archive_path = UPLOADS_DIR / f"{uuid.uuid4()}.zip"
+        total_uploaded = 0
+        with open(archive_path, "wb") as target:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total_uploaded += len(chunk)
+                if total_uploaded > MAX_UPLOAD_BYTES:
+                    target.close(); archive_path.unlink(missing_ok=True)
+                    raise HTTPException(status_code=413, detail="ZIP demasiado grande.")
+                target.write(chunk)
+        try:
+            archive = zipfile.ZipFile(archive_path)
+        except zipfile.BadZipFile:
+            archive_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail="El archivo no es un ZIP válido.")
+        with archive:
+            members = [member for member in archive.infolist() if not member.is_dir()]
+            if len(members) > MAX_ZIP_ENTRIES:
+                raise HTTPException(status_code=400, detail=f"ZIP con demasiados archivos (máximo {MAX_ZIP_ENTRIES}).")
+            if sum(member.file_size for member in members) > MAX_ZIP_UNCOMPRESSED_BYTES:
+                raise HTTPException(status_code=400, detail="ZIP excede el límite seguro de descompresión.")
+            batch_id = str(uuid.uuid4())
+            batch_dir = UPLOADS_DIR / "batches" / batch_id
+            batch_dir.mkdir(parents=True, exist_ok=True)
+            processable = []
+            ignored = []
+            for member in members:
+                member_path = Path(member.filename)
+                if member_path.is_absolute() or ".." in member_path.parts:
+                    ignored.append({"archivo": member.filename, "motivo": "ruta insegura"})
+                    continue
+                safe_name = _sanitize_filename(member_path.name)
+                extension = Path(safe_name).suffix.lower()
+                if extension not in ALLOWED_EXTENSIONS:
+                    ignored.append({"archivo": member.filename, "motivo": "formato no compatible"})
+                    continue
+                target = batch_dir / f"{uuid.uuid4()}{extension}"
+                with archive.open(member) as source, open(target, "wb") as output:
+                    output.write(source.read())
+                if not _has_expected_file_signature(target, extension):
+                    target.unlink(missing_ok=True)
+                    ignored.append({"archivo": member.filename, "motivo": "firma de archivo inválida"})
+                    continue
+                processable.append({"path": str(target), "original_filename": safe_name})
+        archive_path.unlink(missing_ok=True)
+        if not processable:
+            raise HTTPException(status_code=400, detail="El ZIP no contiene PDF o imágenes válidas para procesar.")
+        with _BATCH_IMPORTS_LOCK:
+            BATCH_IMPORTS[batch_id] = {
+                "id": batch_id, "empresa_id": empresa_id, "nombre_zip": original_name,
+                "status": "queued", "total": len(processable), "procesados": 0,
+                "ignorados": ignored, "resultados": [], "creado_en": datetime.utcnow().isoformat(),
+            }
+        background_tasks.add_task(_run_batch_import, batch_id, empresa_id, processable)
+        return BATCH_IMPORTS[batch_id]
+    finally:
+        db.close()
+
+
+@app.get("/api/empresas/{empresa_id}/documentos/import-zip/{batch_id}")
+async def get_zip_import_status(empresa_id: str, batch_id: str):
+    with _BATCH_IMPORTS_LOCK:
+        job = BATCH_IMPORTS.get(batch_id)
+        if not job or job.get("empresa_id") != empresa_id:
+            raise HTTPException(status_code=404, detail="Importación por lote no encontrada")
+        return dict(job)
 
 
 @app.get("/api/empresas/{empresa_id}/documentos/process-stream")
@@ -756,7 +1000,9 @@ async def list_documents(empresa_id: str, limit: int = 50, offset: int = 0):
                     "tipo_documento": d.tipo_documento.value if d.tipo_documento else None,
                     "categoria_id": d.categoria_id,
                     "categoria_nombre": d.categoria.nombre if d.categoria else None,
-                    "estado_revision": d.estado_revision.value if d.estado_revision else "pendiente",
+                    "estado_categoria": "asignada" if d.categoria_id else "sin_categoria",
+                    "estado_revision": d.estado_revision.value if d.estado_revision else "Pendiente",
+                    "es_duplicado": _is_document_duplicate(d),
                     "confianza_clasificacion": d.confianza_clasificacion,
                     "categoria_sugerida": d.categoria.nombre if d.categoria else None,
                     "razon_clasificacion": d.categoria_sugerida if d.categoria_sugerida else None,
@@ -830,6 +1076,8 @@ async def get_document(empresa_id: str, doc_id: str):
             "categoria": doc.categoria.nombre if doc.categoria else None,
             "categoria_nombre": doc.categoria.nombre if doc.categoria else None,
             "categoria_id": doc.categoria_id,
+            "estado_categoria": "asignada" if doc.categoria_id else "sin_categoria",
+            "es_duplicado": _is_document_duplicate(doc),
             "centro_costo": doc.centro_costo.nombre if doc.centro_costo else None,
             "confianza": doc.confianza_clasificacion,
             "estado": estado_val,
@@ -1387,9 +1635,85 @@ async def get_field_mappings(empresa_id: str):
 # ============================================================
 
 class ChatMessage(BaseModel):
-    message: str
+    message: str = ""
     empresa_id: Optional[str] = None
     period_days: int = 90
+    # Acciones estructuradas iniciadas desde controles explícitos de Ledger AI.
+    action: Optional[str] = None
+    payload: dict = {}
+
+
+def _is_document_duplicate(doc: Documento) -> bool:
+    status = str(getattr(getattr(doc, "estado_revision", None), "value", getattr(doc, "estado_revision", "")) or "").lower()
+    if status == "duplicado":
+        return True
+    try:
+        return any(item.get("tipo") == "DUPLICADO" for item in json.loads(doc.excepciones or "[]") if isinstance(item, dict))
+    except (TypeError, json.JSONDecodeError):
+        return False
+
+
+async def _run_chat_action(msg: ChatMessage, db: Session):
+    """Ejecuta acciones locales confirmadas, sin delegar mutaciones al LLM."""
+    action = (msg.action or "").strip().lower()
+    payload = msg.payload or {}
+    if action == "create_company":
+        if not payload.get("confirm"):
+            raise HTTPException(status_code=400, detail="Confirma la creación de la empresa antes de continuar.")
+        result = await create_empresa(EmpresaCreate(**payload))
+        return {
+            "type": "action",
+            "action": "empresa_creada",
+            "text": f"Empresa '{result['razon_social']}' creada en Chile con moneda CLP.",
+            "data": result,
+        }
+    if action == "create_category":
+        if not msg.empresa_id:
+            raise HTTPException(status_code=400, detail="Selecciona una empresa antes de crear una categoría.")
+        if not payload.get("confirm"):
+            raise HTTPException(status_code=400, detail="Confirma la creación de la categoría antes de continuar.")
+        category = CategoriaContableCreate(**payload)
+        result = await create_category(msg.empresa_id, category)
+        return {
+            "type": "action",
+            "action": "categoria_creada",
+            "text": f"Categoría '{result['nombre']}' creada para la empresa activa.",
+            "data": result,
+        }
+    if action in {"lookup_expense", "sum_expenses"}:
+        if not msg.empresa_id:
+            raise HTTPException(status_code=400, detail="Selecciona una empresa para consultar gastos.")
+        provider = str(payload.get("proveedor") or "").strip()
+        query = db.query(Documento).filter(Documento.empresa_id == msg.empresa_id)
+        if provider:
+            query = query.filter(Documento.proveedor.ilike(f"%{provider}%"))
+        docs = [d for d in query.all() if not _is_document_duplicate(d)]
+        total = round(sum(float(d.monto_total or 0) for d in docs), 2)
+        if action == "sum_expenses":
+            target = f" del proveedor '{provider}'" if provider else " de todos los proveedores"
+            return {
+                "type": "expense_summary",
+                "action": "suma_gastos",
+                "text": f"La suma de gastos{target} es ${total:,.0f} CLP en {len(docs)} documento(s) válidos.",
+                "data": {"cantidad_documentos": len(docs), "total_clp": total, "proveedor": provider or None},
+            }
+        records = [{
+            "id": d.id,
+            "proveedor": d.proveedor,
+            "folio": d.folio,
+            "fecha_emision": d.fecha_emision.isoformat() if d.fecha_emision else None,
+            "monto_total": float(d.monto_total or 0),
+            "categoria": d.categoria.nombre if d.categoria else "Sin categoría",
+            "estado": getattr(d.estado_revision, "value", "Pendiente"),
+        } for d in docs[:20]]
+        target = f" para '{provider}'" if provider else ""
+        return {
+            "type": "expense_summary",
+            "action": "consulta_gastos",
+            "text": f"Encontré {len(docs)} gasto(s) válido(s){target}, por un total de ${total:,.0f} CLP.",
+            "data": {"cantidad_documentos": len(docs), "total_clp": total, "documentos": records},
+        }
+    raise HTTPException(status_code=400, detail="Acción de Ledger AI no reconocida.")
 
 
 @app.post("/api/chat")
@@ -1399,6 +1723,10 @@ async def chat_with_assistant(msg: ChatMessage):
 
     db = SessionLocal()
     try:
+        if msg.action:
+            response = await _run_chat_action(msg, db)
+            return {"ok": True, "response": response}
+
         context_data = {}
         docs_summary = []
 
@@ -1412,12 +1740,13 @@ async def chat_with_assistant(msg: ChatMessage):
             ).all()
 
             # Construir resumen de gastos para el contexto
+            docs = [d for d in docs if not _is_document_duplicate(d)]
             total = sum(d.monto_total or 0 for d in docs)
             by_cat: dict = {}
             by_prov: dict = {}
             by_month: dict = {}
             for d in docs:
-                cat = d.categoria_sugerida or "Sin categoría"
+                cat = d.categoria.nombre if d.categoria else (d.categoria_sugerida or "Sin categoría")
                 by_cat[cat] = by_cat.get(cat, 0) + (d.monto_total or 0)
                 prov = d.proveedor or "Desconocido"
                 by_prov[prov] = by_prov.get(prov, 0) + (d.monto_total or 0)
