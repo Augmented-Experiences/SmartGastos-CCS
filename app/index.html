@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>CCS — Pyme Ledger AI | Clasificación de Gastos</title>
+<title>CCS — SmartGastos | Clasificación de Gastos</title>
 <script src="vendor/chart.umd.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN SYSTEM — Pyme Ledger AI (CCS Theme)
+   DESIGN SYSTEM — SmartGastos (CCS Theme)
 ═══════════════════════════════════════════════════════════════ */
 /* ===== FUENTES CCS ===== */
 @font-face {
@@ -1302,7 +1302,7 @@ a:hover { text-decoration: underline; }
 <!-- Global Loading Overlay -->
 <div class="global-overlay" id="globalOverlay">
   <div class="spinner-lg"></div>
-  <div class="overlay-text" id="overlayText">Iniciando Pyme Ledger AI...</div>
+  <div class="overlay-text" id="overlayText">Iniciando SmartGastos...</div>
   <div class="overlay-sub" id="overlaySub">Verificando motor de IA y servidor</div>
 </div>
 
@@ -1315,7 +1315,7 @@ a:hover { text-decoration: underline; }
       <img src="logo.svg" alt="CCS" class="sidebar-logo-img" />
       <div class="sidebar-logo-divider"></div>
       <div>
-        <div class="logo-text">Pyme Ledger AI</div>
+        <div class="logo-text">SmartGastos</div>
         <div class="logo-sub">Clasificación de Gastos</div>
       </div>
     </div>
@@ -1390,14 +1390,14 @@ a:hover { text-decoration: underline; }
     <div class="asst-head">
       <div class="asst-avatar">🤖</div>
       <div>
-        <div class="asst-name">Ledger AI</div>
+        <div class="asst-name">SmartGastos</div>
         <div class="asst-status" id="asstStatus">Asistente contable</div>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="toggleAssistant()" style="margin-left:auto">✕</button>
     </div>
     <div class="asst-msgs" id="asstMsgs"></div>
     <div class="asst-input-area">
-      <div class="asst-quick-actions" aria-label="Acciones de Ledger AI" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
+      <div class="asst-quick-actions" aria-label="Acciones de SmartGastos" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px">
         <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('create_company')">+ Empresa</button>
         <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('create_category')">+ Categoría</button>
         <button class="btn btn-secondary btn-sm" onclick="showAssistantAction('lookup_expense')">Buscar gasto</button>
@@ -1436,7 +1436,7 @@ a:hover { text-decoration: underline; }
       <div id="empAssistBubble" style="background:var(--bg3);border:1px solid var(--ccs-azul);border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start">
         <div style="font-size:22px;flex-shrink:0">🤖</div>
         <div>
-          <div style="font-size:11px;color:var(--ccs-azul-oscuro);font-weight:600;margin-bottom:4px">Ledger AI</div>
+          <div style="font-size:11px;color:var(--ccs-azul-oscuro);font-weight:600;margin-bottom:4px">SmartGastos</div>
           <div id="empAssistText" style="color:var(--text);font-size:13px;line-height:1.5">¡Hola! Voy a ayudarte a registrar tu empresa. Empieza ingresando la <strong>razón social</strong> — el nombre legal completo de tu negocio.</div>
         </div>
       </div>
@@ -1516,7 +1516,7 @@ let state = {
 // INIT
 // ═══════════════════════════════════════════════════════════════
 async function init() {
-  showOverlay('Iniciando Pyme Ledger AI...', 'Conectando con el servidor...');
+  showOverlay('Iniciando SmartGastos...', 'Conectando con el servidor...');
   try {
     // Paso 1: Verificar servidor
     showOverlay('Verificando servidor...', 'Conectando con la API...');
@@ -1998,7 +1998,7 @@ const OB_STEPS = [
   },
   {
     id: 'regimen',
-    question: 'Ledger AI está configurado para Chile y todos los montos se registran en CLP. ¿Qué régimen operativo quieres usar para las recomendaciones?',
+    question: 'SmartGastos está configurado para Chile y todos los montos se registran en CLP. ¿Qué régimen operativo quieres usar para las recomendaciones?',
     placeholder: 'ProPyme o General',
     suggestions: ['ProPyme', 'General'],
     field: 'regimen_tributario',
@@ -2022,7 +2022,7 @@ function showOnboarding() {
     <div class="ob-wrap">
       <div class="ob-hero">
         <span class="ob-hero-icon">📒</span>
-        <div class="ob-hero-title">Bienvenido a Ledger AI</div>
+        <div class="ob-hero-title">Bienvenido a SmartGastos</div>
         <div class="ob-hero-sub">
           Tu asistente de contabilidad con inteligencia artificial local.<br>
           Procesa facturas, clasifica gastos y analiza tus finanzas — todo offline.
@@ -2199,7 +2199,7 @@ async function obFinish() {
     // Botón de inicio
     const btnDiv = document.createElement('div');
     btnDiv.style.cssText = 'padding:14px 18px;border-top:1px solid var(--border);text-align:center';
-    btnDiv.innerHTML = `<button class="btn btn-primary btn-xl" onclick="obGoApp()">🚀 Empezar a usar Ledger AI</button>`;
+    btnDiv.innerHTML = `<button class="btn btn-primary btn-xl" onclick="obGoApp()">🚀 Empezar a usar SmartGastos</button>`;
     document.querySelector('.ob-chat').appendChild(btnDiv);
 
   } catch(e) {
@@ -2213,7 +2213,7 @@ function obGoApp() {
   showSection('nuevo-gasto');
   setTimeout(() => {
     openAssistant();
-    addAsstMsg(`¡Bienvenido a Ledger AI! 🎉\n\nTu empresa "${state.empresa?.razon_social}" está lista.\n\nSube tu primer documento para comenzar. El pipeline IA lo procesará en segundos.`);
+    addAsstMsg(`¡Bienvenido a SmartGastos! 🎉\n\nTu empresa "${state.empresa?.razon_social}" está lista.\n\nSube tu primer documento para comenzar. El pipeline IA lo procesará en segundos.`);
   }, 500);
 }
 

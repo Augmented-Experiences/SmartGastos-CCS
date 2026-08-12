@@ -1,4 +1,4 @@
-# Informe final de corrección y validación — Pyme Ledger AI
+# Informe final de corrección y validación — SmartGastos
 
 **Fecha de validación:** 12 de agosto de 2026  
 **Autor:** Manus AI  
@@ -27,7 +27,7 @@ La carga documental bloquea duplicados exactos por SHA-256 **antes** de ejecutar
 |---|---|
 | Empresa sin RUT | `rut` permite `NULL`; la búsqueda de una empresa existente se hace solo con RUT informado. La migración convierte el antiguo valor centinela a `NULL` y separa giro de régimen. |
 | Solo Chile y CLP | API e interfaz restringen país a Chile, moneda base a CLP y moneda de documento a CLP. Los documentos que declaran otra moneda quedan **Pendientes** con una alerta de conversión/revisión. |
-| Ledger AI accionable | Acciones estructuradas y confirmables para crear empresa, crear categoría, buscar gastos y sumar gastos válidos. Las mutaciones no se delegan al LLM. |
+| SmartGastos accionable | Acciones estructuradas y confirmables para crear empresa, crear categoría, buscar gastos y sumar gastos válidos. Las mutaciones no se delegan al LLM. |
 | Empresa activa y administración | “Empresa activa” muestra y permite cambiar el contexto de trabajo. “Administración” conserva empresas, categorías y reglas. |
 | Anomalías locales | `IsolationForest` local se usa con muestras suficientes; mediana y MAD conforman el fallback determinista para conjuntos pequeños. Las alertas incluyen método, puntuación y razones. |
 | Duplicados | SHA-256 se calcula inmediatamente después de validar la firma del archivo. El intento se registra y el dashboard cuenta duplicados bloqueados. |

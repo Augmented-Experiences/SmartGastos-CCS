@@ -1,5 +1,5 @@
 """
-Servidor principal del plugin pyme-ledger-ai.
+Servidor principal del plugin SmartGastos.
 API FastAPI con endpoints para empresas, documentos, analítica y exportación.
 """
 import os
@@ -74,7 +74,7 @@ print(f"INFO: PORT      = {PORT}")
 # Inicializar BD
 init_db()
 
-app = FastAPI(title="Pyme Ledger AI", version="1.6.0")
+app = FastAPI(title="SmartGastos", version="1.6.0")
 
 # CORS restringido a loopback (plugin on-premise, compatible cross-platform)
 _ALLOWED_ORIGINS = [
@@ -97,7 +97,7 @@ app.add_middleware(
 
 # Exception handler global: oculta stack traces internos del cliente
 import logging as _logging
-_app_logger = _logging.getLogger("pyme_ledger_ai")
+_app_logger = _logging.getLogger("smartgastos")
 
 @app.exception_handler(Exception)
 async def _global_exception_handler(request, exc):
@@ -257,7 +257,7 @@ class EmpresaCreate(BaseModel):
         """El plugin está diseñado exclusivamente para empresas chilenas."""
         if not v or str(v).strip().lower() == "chile":
             return "Chile"
-        raise ValueError("Pyme Ledger AI opera exclusivamente para empresas de Chile.")
+        raise ValueError("SmartGastos opera exclusivamente para empresas de Chile.")
 
     @field_validator('moneda_base', mode='before')
     @classmethod
@@ -268,7 +268,7 @@ class EmpresaCreate(BaseModel):
         cleaned = str(v).strip().split()[0].upper()
         if cleaned == "CLP":
             return "CLP"
-        raise ValueError("Pyme Ledger AI opera exclusivamente con moneda CLP.")
+        raise ValueError("SmartGastos opera exclusivamente con moneda CLP.")
 
     @field_validator('regimen_tributario', mode='before')
     @classmethod
@@ -1631,14 +1631,14 @@ async def get_field_mappings(empresa_id: str):
 
 
 # ============================================================
-# Endpoint: Chat con el Asistente IA (Ledger AI)
+# Endpoint: Chat con el Asistente IA (SmartGastos)
 # ============================================================
 
 class ChatMessage(BaseModel):
     message: str = ""
     empresa_id: Optional[str] = None
     period_days: int = 90
-    # Acciones estructuradas iniciadas desde controles explícitos de Ledger AI.
+    # Acciones estructuradas iniciadas desde controles explícitos de SmartGastos.
     action: Optional[str] = None
     payload: dict = {}
 
@@ -1713,12 +1713,12 @@ async def _run_chat_action(msg: ChatMessage, db: Session):
             "text": f"Encontré {len(docs)} gasto(s) válido(s){target}, por un total de ${total:,.0f} CLP.",
             "data": {"cantidad_documentos": len(docs), "total_clp": total, "documentos": records},
         }
-    raise HTTPException(status_code=400, detail="Acción de Ledger AI no reconocida.")
+    raise HTTPException(status_code=400, detail="Acción de SmartGastos no reconocida.")
 
 
 @app.post("/api/chat")
 async def chat_with_assistant(msg: ChatMessage):
-    """Chat con el Asistente Ledger AI. Responde preguntas sobre gastos y genera datos para gráficos."""
+    """Chat con el Asistente SmartGastos. Responde preguntas sobre gastos y genera datos para gráficos."""
     import requests as _req
 
     db = SessionLocal()
@@ -1778,7 +1778,7 @@ async def chat_with_assistant(msg: ChatMessage):
             except Exception:
                 pass
 
-        system_prompt = """Eres Ledger AI, un asistente contable experto en gastos empresariales de PYMEs latinoamericanas.
+        system_prompt = """Eres SmartGastos, un asistente contable experto en gastos empresariales de PYMEs latinoamericanas.
 Tienes acceso a los datos reales de gastos de la empresa.
 Puedes responder preguntas sobre montos, categorías, proveedores, tendencias y recomendaciones.
 Cuando el usuario pida un gráfico o visualización, responde con un JSON especial:

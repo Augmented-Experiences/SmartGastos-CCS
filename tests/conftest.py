@@ -13,6 +13,6 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'server'))
 
 # Configurar DATA_DIR temporal para tests
-_test_tmpdir = tempfile.mkdtemp(prefix="pyme_ledger_test_")
+_test_tmpdir = tempfile.mkdtemp(prefix="smartgastos_test_")
 os.environ.setdefault('DATA_DIR', _test_tmpdir)
 os.environ.setdefault('OLLAMA_HOST', 'http://127.0.0.1:11434')

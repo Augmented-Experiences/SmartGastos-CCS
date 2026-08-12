@@ -1,5 +1,5 @@
 """
-Agente OCR Multi-Estrategia para pyme-ledger-ai.
+Agente OCR Multi-Estrategia para SmartGastos.
 
 Estrategias en orden de prioridad:
   1. Para PDFs: PyPDF2 (texto digital) → pdf2image + Tesseract/EasyOCR

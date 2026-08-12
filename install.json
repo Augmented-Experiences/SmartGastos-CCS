@@ -3,7 +3,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:20px;background:#f0f4ff;border-radius:12px;margin:16px;border:1px solid #0D3DA6'><h2 style='color:#0D3DA6;margin-bottom:8px'>CCS — Pyme Ledger AI</h2><p style='color:#475569'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#64748b;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
+        "html": "<div style='padding:20px;background:#f0f4ff;border-radius:12px;margin:16px;border:1px solid #0D3DA6'><h2 style='color:#0D3DA6;margin-bottom:8px'>CCS — SmartGastos</h2><p style='color:#475569'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#64748b;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
       }
     },
 
@@ -70,14 +70,14 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:20px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>Pyme Ledger AI está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
+        "html": "<div style='padding:20px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>SmartGastos está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
       }
     },
 
     {
       "method": "notify",
       "params": {
-        "html": "CCS Pyme Ledger AI instalado. Haz click en Iniciar para comenzar."
+        "html": "CCS SmartGastos instalado. Haz click en Iniciar para comenzar."
       }
     }
   ]

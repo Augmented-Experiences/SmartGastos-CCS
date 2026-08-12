@@ -1,5 +1,5 @@
 """
-security.py — Módulo centralizado de seguridad para Pyme Ledger AI
+security.py — Módulo centralizado de seguridad para SmartGastos
 ===================================================================
 Implementa 3 capas de defensa contra inyección de prompts:
   Capa 1: System prompts endurecidos (ver defaults/prompts/)

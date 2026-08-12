@@ -1,10 +1,10 @@
-# Pyme Ledger AI
+# SmartGastos
 
 > Gestión inteligente de documentos contables para PyMEs — 100% local, sin internet.
 
 ## Descripción
 
-**Pyme Ledger AI** es un plugin para [Pinokio](https://pinokio.computer) que permite a pequeñas y medianas empresas gestionar sus documentos contables con inteligencia artificial completamente offline. Extrae, clasifica y organiza facturas, boletas y comprobantes de forma automática usando modelos de IA locales (Ollama + LLaMA).
+**SmartGastos** es un plugin para [Pinokio](https://pinokio.computer) que permite a pequeñas y medianas empresas gestionar sus documentos contables con inteligencia artificial completamente offline. Extrae, clasifica y organiza facturas, boletas y comprobantes de forma automática usando modelos de IA locales (Ollama + LLaMA).
 
 ---
 
@@ -63,7 +63,7 @@
 
 1. Instalar [Pinokio](https://pinokio.computer)
 2. Abrir Pinokio y hacer clic en **Discover**
-3. Buscar **Pyme Ledger AI** o pegar la URL del repositorio
+3. Buscar **SmartGastos** o pegar la URL del repositorio
 4. Hacer clic en **Instalar** — el proceso es automático
 
 El instalador se encarga de:
@@ -109,7 +109,7 @@ El instalador se encarga de:
 ## Arquitectura
 
 ```
-pyme-ledger-ai/
+SmartGastos/
 ├── server/
 │   ├── app.py                    # Servidor FastAPI principal
 │   ├── models.py                 # Modelos SQLAlchemy (SQLite)

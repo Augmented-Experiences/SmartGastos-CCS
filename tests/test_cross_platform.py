@@ -327,7 +327,7 @@ class TestNoOldJsFiles(unittest.TestCase):
 if __name__ == "__main__":
     print(f"\n{'='*60}")
     print(f"  PRUEBAS DE COMPATIBILIDAD CROSS-PLATFORM")
-    print(f"  Plugin: pyme-ledger-ai.pinokio")
+    print(f"  Plugin: SmartGastos")
     print(f"  Plataforma actual: {sys.platform}")
     print(f"{'='*60}\n")
 

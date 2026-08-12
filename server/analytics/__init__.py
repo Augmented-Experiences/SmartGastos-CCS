@@ -1,5 +1,5 @@
 """
-Módulo de analítica para pyme-ledger-ai.
+Módulo de analítica para SmartGastos.
 Contiene: Análisis, Recomendaciones, Exportación.
 """
 

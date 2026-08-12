@@ -1,5 +1,5 @@
 """
-Modelos de datos para pyme-ledger-ai.
+Modelos de datos para SmartGastos.
 Define las entidades principales: Empresa, Centro de Costo, Categoría Contable, Documento.
 """
 from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, ForeignKey, Text, Enum

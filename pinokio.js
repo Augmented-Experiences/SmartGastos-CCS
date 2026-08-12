@@ -1,5 +1,5 @@
 module.exports = {
-  title: "CCS — Pyme Ledger AI",
+  title: "CCS — SmartGastos",
   description: "Clasificación inteligente de gastos con IA local para PyMEs — 100% offline | CCS",
   icon: "icon.png",
   version: "1.5.0",

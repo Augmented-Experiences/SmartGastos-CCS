@@ -1,4 +1,4 @@
-# Plan de corrección y validación — Pyme Ledger AI
+# Plan de corrección y validación — SmartGastos
 
 ## Alcance y línea base
 
@@ -12,7 +12,7 @@ Los tres conjuntos documentales proporcionados contienen PDF, imágenes, mensaje
 |---|---|---|---|
 | AC-01 | Dos empresas creadas sin RUT reciben identificadores internos diferentes; ninguna altera a la otra. | Fallido: el RUT centinela `00.000.000-0` es único y dispara actualización. | Prueba de API y respuesta con `created=true` para cada empresa. |
 | AC-02 | Solo se aceptan empresas chilenas, RUT chileno opcional y moneda base CLP. | Fallido: API e interfaz permiten países y monedas extra. | Pruebas de validación HTTP 422 y controles UI limitados a Chile/CLP. |
-| AC-03 | Ledger AI permite crear empresa, crear categoría y consultar gasto individual o agregado, con confirmación para mutaciones. | Parcial: solo responde texto/gráficos. | Pruebas de comandos estructurados y acciones visibles en la conversación. |
+| AC-03 | SmartGastos permite crear empresa, crear categoría y consultar gasto individual o agregado, con confirmación para mutaciones. | Parcial: solo responde texto/gráficos. | Pruebas de comandos estructurados y acciones visibles en la conversación. |
 | AC-04 | “Empresa activa” abre un selector/resumen de contexto, mientras “Administración” conserva la gestión completa. | Fallido: ambos disparan `renderAdmin`. | Prueba estática/UI y navegación funcional diferenciada. |
 | AC-05 | Las anomalías se basan en un algoritmo local de aprendizaje no supervisado y devuelven puntuación, método y razones. | Fallido: existen solo reglas fijas. | Pruebas con datos reales/sintéticos deterministas y respuesta de alertas enriquecida. |
 | AC-06 | Una segunda carga del mismo archivo se identifica antes del procesamiento costoso y no crea ni duplica el gasto contable. | Parcial: detección tardía y estado inconsistente. | Pruebas de hash, respuesta 409/resultado duplicado y una sola fila contable. |

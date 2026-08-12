@@ -1,5 +1,5 @@
 # ============================================================
-# Pyme Ledger AI — Dependencias Python
+# SmartGastos — Dependencias Python
 # Paquetes reales de PyPI con versiones fijas y verificadas.
 # Instalado automáticamente por setup.py usando venv/bin/pip.
 # ============================================================

@@ -1,5 +1,5 @@
 """
-launcher.py — Lanzador cross-platform para pyme-ledger-ai.
+launcher.py — Lanzador cross-platform para SmartGastos.
 Ejecutado por start.json. Detecta la plataforma y usa la ruta
 correcta del Python del venv para iniciar server/app.py.
 

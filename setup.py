@@ -1,5 +1,5 @@
 """
-setup.py — Script de instalación cross-platform para pyme-ledger-ai.
+setup.py — Script de instalación cross-platform para SmartGastos.
 Ejecutado por install.json. Funciona en macOS, Windows y Linux.
 
 Responsabilidades:

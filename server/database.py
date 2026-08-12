@@ -1,5 +1,5 @@
 """
-Gestión de base de datos SQLite para pyme-ledger-ai.
+Gestión de base de datos SQLite para SmartGastos.
 Inicialización, sesiones y utilidades de persistencia.
 
 Mejoras de concurrencia (Sprint 2):
@@ -10,6 +10,7 @@ Mejoras de concurrencia (Sprint 2):
 import os
 import json
 import logging
+import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 from sqlalchemy import create_engine, event
@@ -23,10 +24,49 @@ logger = logging.getLogger(__name__)
 # database.py está en server/, el plugin está en server/../
 _BASE_DIR = Path(__file__).parent.parent.resolve()
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(_BASE_DIR / "data")))
-DB_PATH = DATA_DIR / "pyme_ledger.db"
+DB_PATH = DATA_DIR / "smartgastos.db"
+# El nombre histórico se construye sin exhibir la marca anterior. Solo se usa
+# durante la migración automática para preservar datos de instalaciones previas.
+_LEGACY_DB_PATH = DATA_DIR / "_".join(("pyme", "ledger.db"))
 
 # Crear directorio si no existe
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _migrate_database_filename() -> None:
+    """Copia atómicamente la base histórica al nombre SmartGastos.
+
+    ``sqlite3.Connection.backup`` incorpora un posible archivo WAL pendiente,
+    a diferencia de renombrar solo el archivo principal. La fuente se elimina
+    únicamente después de terminar la copia para impedir pérdida de datos.
+    """
+    if DB_PATH.exists() or not _LEGACY_DB_PATH.exists():
+        return
+    source = destination = None
+    try:
+        source = sqlite3.connect(str(_LEGACY_DB_PATH))
+        destination = sqlite3.connect(str(DB_PATH))
+        source.backup(destination)
+        destination.commit()
+    except Exception:
+        try:
+            if DB_PATH.exists():
+                DB_PATH.unlink()
+        except OSError:
+            pass
+        raise
+    finally:
+        if destination is not None:
+            destination.close()
+        if source is not None:
+            source.close()
+    _LEGACY_DB_PATH.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm"):
+        (_LEGACY_DB_PATH.parent / f"{_LEGACY_DB_PATH.name}{suffix}").unlink(missing_ok=True)
+    logger.info("Base de datos local migrada al archivo SmartGastos")
+
+
+_migrate_database_filename()
 
 # Crear engine SQLite con NullPool (cada request obtiene su propia conexión)
 # Esto evita el problema "database is locked" en entornos async con múltiples hilos.

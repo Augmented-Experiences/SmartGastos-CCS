@@ -1,4 +1,4 @@
-"""Pruebas de aceptación para la evolución chilena de Pyme Ledger AI."""
+"""Pruebas de aceptación para la evolución chilena de SmartGastos."""
 import hashlib
 import io
 import json

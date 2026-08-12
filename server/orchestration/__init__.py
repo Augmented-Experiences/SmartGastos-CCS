@@ -1,5 +1,5 @@
 """
-Módulo de orquestación para pyme-ledger-ai.
+Módulo de orquestación para SmartGastos.
 Contiene el pipeline de procesamiento de documentos.
 """
 

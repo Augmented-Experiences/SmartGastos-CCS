@@ -1,5 +1,5 @@
 """
-Módulo de recomendaciones para pyme-ledger-ai.
+Módulo de recomendaciones para SmartGastos.
 Genera sugerencias de optimización y ahorro de gastos.
 """
 import json

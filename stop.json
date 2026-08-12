@@ -3,7 +3,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>Deteniendo Pyme Ledger AI...</h3></div>"
+        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>Deteniendo SmartGastos...</h3></div>"
       }
     },
     {
@@ -25,7 +25,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B'>Pyme Ledger AI detenido correctamente.</h3></div>"
+        "html": "<div style='padding:16px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B'>SmartGastos detenido correctamente.</h3></div>"
       }
     }
   ]

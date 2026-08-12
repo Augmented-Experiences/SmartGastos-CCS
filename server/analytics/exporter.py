@@ -1,5 +1,5 @@
 """
-Módulo de exportación para pyme-ledger-ai.
+Módulo de exportación para SmartGastos.
 Genera reportes en CSV (formato Excel-friendly), XLSX y PDF.
 """
 import os

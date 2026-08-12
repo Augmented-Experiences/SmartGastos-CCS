@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DATABASE = ROOT / "validation_data" / "pyme_ledger.db"
+DATABASE = ROOT / "validation_data" / "smartgastos.db"
 OUTPUT = ROOT / "VALIDATION_SUPPLIED_ZIPS_SUMMARY.json"
 
 

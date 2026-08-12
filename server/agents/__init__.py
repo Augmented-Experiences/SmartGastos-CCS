@@ -1,5 +1,5 @@
 """
-Módulo de agentes especializados para pyme-ledger-ai.
+Módulo de agentes especializados para SmartGastos.
 Contiene: OCR, Extractor, Clasificador, Auditor.
 """
 

@@ -1,4 +1,4 @@
-"""Valida el importador ZIP con los documentos reales entregados para Pyme Ledger AI."""
+"""Valida el importador ZIP con los documentos reales entregados para SmartGastos."""
 from __future__ import annotations
 
 import json
