@@ -47,6 +47,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Tuple
 
+from agents.ocr_agent import get_ocr_agent
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -77,6 +79,22 @@ def _ollama_list() -> List[str]:
     except Exception as e:
         logger.debug(f"No se pudo obtener modelos de Ollama: {e}")
     return []
+
+
+_TEXT_ONLY_MODEL_PREFIXES = ("qwen3", "qwen2.5", "llama3.2:3b", "llama3:8b", "phi", "gemma")
+
+
+def _coerce_multimodal_model(
+    model: Optional[str], vision_fallback: Optional[str], needs_image: bool
+) -> Optional[str]:
+    """Evita enviar imagenes a modelos solo-texto (p. ej. qwen3 en instalador desktop)."""
+    if not model:
+        return vision_fallback
+    if needs_image and vision_fallback:
+        lower = model.lower()
+        if any(t in lower for t in _TEXT_ONLY_MODEL_PREFIXES):
+            return vision_fallback
+    return model
 
 
 def _find_best_model(preferred_list: List[str], available: List[str]) -> Optional[str]:
@@ -1003,7 +1021,7 @@ class DocumentPipelineAgent:
             # VISION: Usa VISION_DEFAULT_MODEL (moondream) porque necesita soporte multimodal.
             # qwen3:0.6b NO soporta imágenes y falla silenciosamente en Windows.
             "vision":       {"modelo": VISION_DEFAULT_MODEL,  "timeout": 300, "temperature": 0.1, "max_tokens": 4096},
-            "extractor":    {"modelo": QWEN_MODEL,  "timeout": 240, "temperature": 0.1, "max_tokens": 3000},
+            "extractor":    {"modelo": VISION_DEFAULT_MODEL, "timeout": 240, "temperature": 0.1, "max_tokens": 3000},
             "clasificador": {"modelo": LLAMA_MODEL, "timeout": 120, "temperature": 0.05, "max_tokens": 1024},
             "auditor":      {"modelo": LLAMA_MODEL, "timeout": 180, "temperature": 0.05, "max_tokens": 2048},
             "recomendador": {"modelo": LLAMA_MODEL, "timeout": 240, "temperature": 0.2,  "max_tokens": 3000},
@@ -1232,16 +1250,29 @@ class DocumentPipelineAgent:
         # ── PASO 1: OCR ───────────────────────────────────────────────────────
         # El OCR no usa LLM — usa Tesseract/EasyOCR directamente
         # Produce: texto bruto que alimenta a todos los agentes siguientes
+        ocr_running_msg = (
+            f"Procesando {original_filename} con moondream (Ollama vision)..."
+            if os.environ.get("RUN_BY_TAURI") == "1"
+            else f"Procesando {original_filename} con Tesseract multi-PSM + preprocesamiento..."
+        )
         yield self._emit("ocr", "running", {
             "title": "Agente OCR — Extracción de texto",
-            "message": f"Procesando {original_filename} con Tesseract multi-PSM + preprocesamiento..."
+            "message": ocr_running_msg,
         })
 
         try:
-            if ext == ".pdf":
-                ocr_result = ocr_pdf(file_path)
-            else:
-                ocr_result = ocr_image(file_path)
+            raw_ocr = get_ocr_agent().extract_from_file(file_path)
+            ocr_result = {
+                "text": raw_ocr.get("text", "") or "",
+                "words": raw_ocr.get("word_count", 0),
+                "method": raw_ocr.get("method", "unknown"),
+            }
+            logger.info(
+                "Pipeline OCR: metodo=%s palabras=%s archivo=%s",
+                ocr_result["method"],
+                ocr_result["words"],
+                original_filename,
+            )
 
             ctx["ocr_text"] = ocr_result["text"]
             ctx["combined_text"] = ocr_result["text"]
@@ -1373,6 +1404,13 @@ class DocumentPipelineAgent:
         # Produce: campos estructurados consolidados
         cfg_extractor = self._get_agent_config("extractor")
         extractor_model_to_use = cfg_extractor["modelo"] or text_model
+        if self._available_models is not None:
+            resolved = _find_best_model([extractor_model_to_use], self._available_models)
+            if resolved:
+                extractor_model_to_use = resolved
+        extractor_model_to_use = _coerce_multimodal_model(
+            extractor_model_to_use, vision_model, bool(img_b64)
+        )
         yield self._emit("extraction", "running", {
             "title": "Agente Extractor — Consolidación de campos",
             "message": f"Extrayendo campos con {extractor_model_to_use} + regex sobre texto OCR y campos visuales..."
@@ -1386,8 +1424,17 @@ class DocumentPipelineAgent:
                 if k not in ctx["fields"] or not ctx["fields"][k]:
                     ctx["fields"][k] = v
 
-            # 2. LLM con imagen + contexto acumulado si está disponible
-            if extractor_model_to_use and ctx["combined_text"] and len(ctx["combined_text"].split()) >= 5:
+            # 2. LLM con imagen + contexto (desktop: moondream aun con OCR vacio)
+            word_count = len(ctx["combined_text"].split()) if ctx["combined_text"] else 0
+            run_extractor_llm = bool(
+                extractor_model_to_use
+                and (
+                    img_b64
+                    or ctx["vision_fields"]
+                    or word_count >= 5
+                )
+            )
+            if run_extractor_llm:
                 # Usar prompt personalizado si está configurado
                 if cfg_extractor["prompt"]:
                     extractor_prompt = cfg_extractor["prompt"].replace("{text}", ctx["combined_text"][:2500])

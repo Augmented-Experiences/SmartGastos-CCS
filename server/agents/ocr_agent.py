@@ -40,6 +40,13 @@ VISION_MODELS_PREFERENCE = [
 # Umbral mínimo de palabras para considerar OCR exitoso
 MIN_WORDS = 10
 
+
+def _is_desktop_sidecar() -> bool:
+    """Instalador Tauri (PyInstaller): OCR neuronal via Ollama, sin EasyOCR/torch."""
+    import sys
+
+    return os.environ.get("RUN_BY_TAURI") == "1" or bool(getattr(sys, "frozen", False))
+
 # ── Imports opcionales ────────────────────────────────────────────────────────
 try:
     import PyPDF2
@@ -311,10 +318,10 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
             logger.info(f"VLLM ({model}): {_word_count(text)} palabras")
             return text
         else:
-            logger.warning(f"Ollama VLLM HTTP {resp.status_code}")
+            logger.warning("Ollama VLLM HTTP %s body=%s", resp.status_code, resp.text[:200])
             return ""
     except Exception as e:
-        logger.debug(f"VLLM Ollama falló: {e}")
+        logger.warning("VLLM Ollama falló (model=%s): %s", model, e)
         return ""
 
 
@@ -478,6 +485,36 @@ class OCRAgent:
     def _process_image(self, file_path: str) -> Dict:
         """Pipeline OCR para imágenes con múltiples estrategias."""
         strategies_tried = {}
+
+        if _is_desktop_sidecar():
+            vm = self._get_vision_model_cached()
+            best_text, best_method, best_wc = "", "none", 0
+            if vm:
+                text_vllm = ocr_vllm_ollama(file_path, vm)
+                wc_vllm = _word_count(text_vllm)
+                strategies_tried[f"vllm_{vm}"] = wc_vllm
+                best_text, best_method, best_wc = text_vllm, f"vllm_{vm}", wc_vllm
+                logger.info(
+                    "Desktop OCR (Ollama %s): %s palabras en %s",
+                    vm,
+                    wc_vllm,
+                    file_path,
+                )
+            else:
+                logger.warning(
+                    "Desktop OCR: ningun modelo de vision en Ollama (esperado: moondream)"
+                )
+            if _tesseract_available() and best_wc < MIN_WORDS * 2:
+                text = ocr_tesseract(file_path)
+                wc = _word_count(text)
+                strategies_tried["tesseract"] = wc
+                if wc > best_wc:
+                    best_text, best_method, best_wc = text, "tesseract", wc
+            return {
+                "text": best_text,
+                "method": best_method,
+                "strategies": strategies_tried,
+            }
 
         # Estrategia 1: Tesseract multi-PSM
         text = ocr_tesseract(file_path)

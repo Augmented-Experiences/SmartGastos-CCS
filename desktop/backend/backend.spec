@@ -63,6 +63,12 @@ hiddenimports = [
     "security",
     "hardware",
     "ollama_client",
+    "pipeline_agent",
+    "agents",
+    "agents.ocr_agent",
+    "agents.extractor_agent",
+    "agents.classifier_agent",
+    "agents.auditor_agent",
 ]
 
 a = Analysis(
