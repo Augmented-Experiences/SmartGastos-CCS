@@ -7,6 +7,7 @@
   "accent": "#2E9E3F",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
   "shortDescription": "Gestión de gastos/contabilidad con IA local (CCCE)",
+  "splashSubtitle": "Preparando tu asistente de gastos y contabilidad con IA local…",
   "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE).",
   "ollama": {
     "tiers": [

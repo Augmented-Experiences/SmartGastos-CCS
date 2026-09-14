@@ -57,6 +57,10 @@ jobs:
         working-directory: desktop
         run: npm install
 
+      - name: Generate Tauri icons
+        working-directory: desktop
+        run: npm run icon
+
       - name: Build Tauri app
         working-directory: desktop
         run: npm run build -- --target ${{ matrix.target }}

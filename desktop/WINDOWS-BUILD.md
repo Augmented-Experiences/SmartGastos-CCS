@@ -68,14 +68,13 @@ npm run build
 ```powershell
 git clone https://github.com/Augmented-Experiences/pyme-ledger-ai.pinokio.git SmartGastos
 cd SmartGastos
-git apply smartgastos_full.patch
+# smartsuite.config.json ya debe ser SmartGastos (desktop/examples/smartgastos.config.json)
 py -3.12 -m venv venv
-powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1
-cd desktop
-npm install
-npm run icon
-npm run build
+# -Installer: sidecar + MSI + *-setup.exe (sin este flag solo genera backend-*.exe)
+powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1 -Installer
 ```
+
+Si prefieres dos pasos: ejecuta `build-backend.ps1` sin `-Installer`, luego `cd desktop`, `npm install`, `npm run icon` (una vez), `npm run build`.
 
 ---
 

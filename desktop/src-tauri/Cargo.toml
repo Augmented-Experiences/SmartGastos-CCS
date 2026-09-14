@@ -1,7 +1,7 @@
 [package]
-name = "smartcaja"
-version = "2.0.0"
-description = "SmartCaja — flujo de caja con IA local (CCCE)"
+name = "smartgastos"
+version = "1.0.0"
+description = "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE)."
 authors = ["Cámara Colombiana de Comercio Electrónico (CCCE)"]
 edition = "2021"
 rust-version = "1.77"
@@ -18,7 +18,7 @@ sysinfo = "0.33"
 ureq = { version = "2", default-features = false }
 
 [[bin]]
-name = "smartcaja"
+name = "smartgastos"
 path = "src/main.rs"
 
 [profile.release]

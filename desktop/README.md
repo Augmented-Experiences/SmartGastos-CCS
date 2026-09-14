@@ -42,7 +42,7 @@ Todo lo específico de cada app vive en `desktop/smartsuite.config.json`:
 | `ollama.tiers` | Modelo (chat/LLM) a descargar según la RAM (`maxRamGb: 0` = sin límite / último). |
 | `ollama.extraModels` | Modelos adicionales a descargar con progreso (p. ej. un modelo de **visión para OCR neuronal** como `moondream`). Se descargan igual que el LLM, con barra de progreso en la pantalla de carga — así capacidades pesadas (OCR) no requieren empaquetar torch/easyocr. |
 
-`scripts/configure.mjs` (se ejecuta solo con `npm run build`/`npm run dev`) genera desde ese config: `src-tauri/tauri.conf.json`, `src-tauri/appconfig.json` (que Rust lee) y los CSS de marca (`ui/ccce-theme.css`, `ui/accent.css`).
+`scripts/configure.mjs` (se ejecuta solo con `npm run build`/`npm run dev`) genera desde ese config: `src-tauri/tauri.conf.json`, `src-tauri/appconfig.json` (que Rust lee), `src-tauri/Cargo.toml`, `ui/index.html` (splash), `package.json` y los CSS de marca (`ui/ccce-theme.css`, `ui/accent.css`).
 
 ## Brand kit CCCE (estilo compartido)
 

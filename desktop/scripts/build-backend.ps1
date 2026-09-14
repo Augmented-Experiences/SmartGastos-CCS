@@ -1,5 +1,9 @@
+param(
+  [switch]$Installer  # Si se pasa, continúa con 'npm run build' en desktop/ (MSI + setup.exe)
+)
+
 # ============================================================
-# build-backend.ps1 — Empaqueta el backend FastAPI de SmartCaja
+# build-backend.ps1 — Empaqueta el backend FastAPI (sidecar Tauri)
 # en un binario único (sidecar de Tauri) con PyInstaller (Windows)
 # y lo coloca en desktop/src-tauri/binaries con el sufijo del target.
 #
@@ -75,3 +79,30 @@ $Triple = ((rustc -vV | Select-String "host: ") -replace "host: ", "").Trim()
 New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
 Copy-Item "desktop/backend/dist/backend.exe" "desktop/src-tauri/binaries/backend-$Triple.exe" -Force
 Write-Host "==> Sidecar listo: desktop/src-tauri/binaries/backend-$Triple.exe"
+Write-Host ""
+if ($Installer) {
+  Write-Host "==> Compilando instalador Tauri (MSI + NSIS setup.exe)…" -ForegroundColor Cyan
+  Set-Location $Desktop
+  if (-not (Test-Path "node_modules")) {
+    Write-Host "==> npm install (desktop)"
+    npm install
+  }
+  if (-not (Test-Path "src-tauri/icons/icon.ico")) {
+    Write-Host "==> Generando iconos (npm run icon) — solo la primera vez"
+    npm run icon
+  }
+  npm run build
+  Write-Host ""
+  Write-Host "Instaladores:" -ForegroundColor Green
+  Write-Host "  $Desktop\src-tauri\target\release\bundle\msi\*.msi"
+  Write-Host "  $Desktop\src-tauri\target\release\bundle\nsis\*-setup.exe"
+} else {
+  Write-Host "Siguiente paso (instalador .msi / *-setup.exe, no solo el sidecar):" -ForegroundColor Yellow
+  Write-Host "  cd desktop"
+  Write-Host "  npm install"
+  Write-Host "  npm run icon    # una sola vez"
+  Write-Host "  npm run build"
+  Write-Host ""
+  Write-Host "O en un solo paso desde la raíz del repo:" -ForegroundColor Yellow
+  Write-Host "  powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1 -Installer"
+}

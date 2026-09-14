@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
+INSTALLER=0
+if [[ "${1:-}" == "--installer" ]]; then
+  INSTALLER=1
+fi
+
 # ============================================================
-# build-backend.sh — Empaqueta el backend FastAPI de SmartCaja
+# build-backend.sh — Empaqueta el backend FastAPI (sidecar Tauri)
 # en un binario único (sidecar de Tauri) con PyInstaller y lo
 # coloca en desktop/src-tauri/binaries con el sufijo del target.
 # ============================================================
@@ -59,3 +64,16 @@ mkdir -p desktop/src-tauri/binaries
 cp "desktop/backend/dist/backend" "desktop/src-tauri/binaries/backend-${TRIPLE}"
 chmod +x "desktop/src-tauri/binaries/backend-${TRIPLE}"
 echo "==> Sidecar listo: desktop/src-tauri/binaries/backend-${TRIPLE}"
+echo ""
+if [[ "$INSTALLER" == "1" ]]; then
+  echo "==> Compilando instalador Tauri…"
+  cd desktop
+  if [[ ! -d node_modules ]]; then npm install; fi
+  if [[ ! -f src-tauri/icons/icon.ico ]]; then npm run icon; fi
+  npm run build
+  echo "Instaladores en desktop/src-tauri/target/release/bundle/"
+else
+  echo "Siguiente paso (instalador, no solo el sidecar):"
+  echo "  cd desktop && npm install && npm run icon && npm run build"
+  echo "O: bash desktop/scripts/build-backend.sh --installer"
+fi

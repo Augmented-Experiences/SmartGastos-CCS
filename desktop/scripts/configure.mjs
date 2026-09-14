@@ -2,9 +2,12 @@
 // ============================================================
 // configure.mjs — Genera los archivos variables del launcher Tauri
 // a partir de desktop/smartsuite.config.json:
-//   - src-tauri/tauri.conf.json   (nombre, id, iconos, ventana, descripciones)
-//   - src-tauri/appconfig.json    (dataDirName + modelos de Ollama para Rust)
-//   - ui/ccce-theme.css + ui/accent.css  (marca CCCE + acento por-herramienta)
+//   - src-tauri/tauri.conf.json
+//   - src-tauri/appconfig.json
+//   - src-tauri/Cargo.toml (name/description/bin)
+//   - src-tauri/capabilities/default.json
+//   - package.json (npm name/description)
+//   - ui/index.html (splash), ui/ccce-theme.css, ui/accent.css
 //
 // Se ejecuta automáticamente antes de 'npm run build' / 'npm run dev'.
 // ============================================================
@@ -22,19 +25,53 @@ function req(name) {
   return cfg[name];
 }
 
+const productName = req("productName");
+const version = cfg.version || "1.0.0";
+const identifier = req("identifier");
+const dataDirName = req("dataDirName");
+const accent = cfg.accent || "#F4C10E";
+
+/** Identificador Rust/npm estable (co.org.ccce.smartgastos → smartgastos). */
+function cargoPackageName() {
+  if (cfg.cargoPackageName) return String(cfg.cargoPackageName).toLowerCase();
+  const last = identifier.split(".").pop() || "smartapp";
+  return last.replace(/[^a-z0-9_]/gi, "").toLowerCase() || "smartapp";
+}
+
+/** Marca en splash: SmartGastos → Smart + Gastos (acento). */
+function brandHtml(name) {
+  if (/^Smart[A-ZÁÉÍÓÚÑ]/.test(name) && name.length > 5) {
+    const tail = name.slice(5);
+    return `Smart<span class="accent">${escapeHtml(tail)}</span>`;
+  }
+  return `<span class="accent">${escapeHtml(name)}</span>`;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+const pkg = cargoPackageName();
+const splashSubtitle =
+  cfg.splashSubtitle || cfg.shortDescription || `Preparando ${productName}…`;
+
 // --- 1) tauri.conf.json ---
 const tauriConf = {
   $schema: "https://schema.tauri.app/config/2",
-  productName: req("productName"),
-  version: cfg.version || "1.0.0",
-  identifier: req("identifier"),
+  productName,
+  version,
+  identifier,
   build: { frontendDist: "../ui" },
   app: {
     withGlobalTauri: true,
     windows: [
       {
         label: "main",
-        title: (cfg.window && cfg.window.title) || cfg.productName,
+        title: (cfg.window && cfg.window.title) || productName,
         width: (cfg.window && cfg.window.width) || 1200,
         height: (cfg.window && cfg.window.height) || 800,
         minWidth: (cfg.window && cfg.window.minWidth) || 900,
@@ -47,7 +84,8 @@ const tauriConf = {
   },
   bundle: {
     active: true,
-    targets: "all",
+    // MSI + NSIS en Windows; demás SO en sus formatos nativos.
+    targets: ["msi", "nsis", "deb", "rpm", "appimage", "dmg"],
     icon: [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -57,8 +95,8 @@ const tauriConf = {
     ],
     externalBin: ["binaries/backend"],
     category: "Finance",
-    shortDescription: cfg.shortDescription || cfg.productName,
-    longDescription: cfg.longDescription || cfg.productName,
+    shortDescription: cfg.shortDescription || productName,
+    longDescription: cfg.longDescription || productName,
   },
   plugins: {},
 };
@@ -72,19 +110,106 @@ const tiers = ((cfg.ollama && cfg.ollama.tiers) || [{ maxRamGb: 0, model: "llama
   (t) => ({ maxRamGb: Number(t.maxRamGb) || 0, model: String(t.model) })
 );
 const extraModels = ((cfg.ollama && cfg.ollama.extraModels) || []).map(String);
-const appConfig = { dataDirName: req("dataDirName"), ollamaTiers: tiers, extraModels };
+const appConfig = {
+  productName,
+  dataDirName,
+  ollamaTiers: tiers,
+  extraModels,
+};
 writeFileSync(
   resolve(DESKTOP, "src-tauri/appconfig.json"),
   JSON.stringify(appConfig, null, 2) + "\n"
 );
 
-// --- 3) Marca CCCE + acento por-herramienta en la UI de carga ---
+// --- 3) Cargo.toml ---
+const cargoDescription = cfg.longDescription || cfg.shortDescription || productName;
+const cargoToml = `[package]
+name = "${pkg}"
+version = "${version}"
+description = "${cargoDescription.replace(/"/g, '\\"')}"
+authors = ["Cámara Colombiana de Comercio Electrónico (CCCE)"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.33"
+ureq = { version = "2", default-features = false }
+
+[[bin]]
+name = "${pkg}"
+path = "src/main.rs"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+`;
+writeFileSync(resolve(DESKTOP, "src-tauri/Cargo.toml"), cargoToml);
+
+// --- 4) capabilities/default.json ---
+const capabilities = {
+  $schema: "../gen/schemas/desktop-schema.json",
+  identifier: "default",
+  description: `Permisos base para la ventana principal de ${productName}.`,
+  windows: ["main"],
+  permissions: ["core:default"],
+};
+writeFileSync(
+  resolve(DESKTOP, "src-tauri/capabilities/default.json"),
+  JSON.stringify(capabilities, null, 2) + "\n"
+);
+
+// --- 5) package.json (npm) ---
+const pkgJsonPath = resolve(DESKTOP, "package.json");
+const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+pkgJson.name = `${pkg}-desktop`;
+pkgJson.version = version;
+pkgJson.description = `Instalador/app de escritorio nativo de ${productName} (Tauri) — CCCE`;
+writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + "\n");
+
+// --- 6) Splash UI ---
 mkdirSync(resolve(DESKTOP, "ui"), { recursive: true });
 copyFileSync(resolve(DESKTOP, "brand/ccce-theme.css"), resolve(DESKTOP, "ui/ccce-theme.css"));
-const accent = cfg.accent || "#F4C10E";
 writeFileSync(
   resolve(DESKTOP, "ui/accent.css"),
   `/* Generado por configure.mjs — acento por-herramienta */\n:root { --ccce-accent: ${accent}; }\n`
 );
 
-console.log(`configure.mjs: '${cfg.productName}' configurado (accent ${accent}, dataDir ${cfg.dataDirName}).`);
+const splashTpl = readFileSync(resolve(DESKTOP, "ui/splash.template.html"), "utf8");
+const splashHtml = splashTpl
+  .replaceAll("{{PRODUCT_NAME}}", escapeHtml(productName))
+  .replaceAll("{{BRAND_HTML}}", brandHtml(productName))
+  .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle));
+writeFileSync(resolve(DESKTOP, "ui/index.html"), splashHtml);
+
+// --- 7) Cargo.lock: alinear nombre del paquete si cambió ---
+const lockPath = resolve(DESKTOP, "src-tauri/Cargo.lock");
+try {
+  let lock = readFileSync(lockPath, "utf8");
+  const lockNameRe = /^name = "([^"]+)"$/m;
+  if (lock.includes('name = "smartcaja"') && pkg !== "smartcaja") {
+    lock = lock.replaceAll('name = "smartcaja"', `name = "${pkg}"`);
+    writeFileSync(lockPath, lock);
+  } else if (lock.includes(`name = "${pkg}"`) === false && lockNameRe.test(lock)) {
+    const firstPkg = lock.match(lockNameRe);
+    if (firstPkg && firstPkg[1] !== pkg) {
+      lock = lock.replaceAll(`name = "${firstPkg[1]}"`, `name = "${pkg}"`);
+      writeFileSync(lockPath, lock);
+    }
+  }
+} catch {
+  // lock se regenerará en el primer cargo build
+}
+
+console.log(
+  `configure.mjs: '${productName}' (${pkg}) — accent ${accent}, dataDir ${dataDirName}, bundles msi+nsis+…`
+);
