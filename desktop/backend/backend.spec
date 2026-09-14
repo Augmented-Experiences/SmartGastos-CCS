@@ -1,19 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 #
-# PyInstaller spec para empaquetar el backend FastAPI de SmartCaja como un
-# binario único (sidecar de Tauri). Los recursos de solo lectura (app/, defaults/)
-# se incluyen en el bundle; el backend los resuelve vía sys._MEIPASS cuando está
-# congelado (ver server/app.py).
+# PyInstaller spec — backend FastAPI sidecar for Tauri desktop.
+# MUST bundle repo app/ (UI) into _MEIPASS/app for frozen StaticFiles.
 #
 import json
+import sys
 from pathlib import Path
 
-BACKEND_DIR = Path(SPECPATH).resolve()      # desktop/backend
-DESKTOP = BACKEND_DIR.parent                 # desktop
-ROOT = DESKTOP.parent                         # raíz del repo
+BACKEND_DIR = Path(SPECPATH).resolve()
+DESKTOP = BACKEND_DIR.parent
+ROOT = DESKTOP.parent
 SERVER = ROOT / "server"
 
-# Config por-herramienta (excludes/datas opcionales)
 _pyi = {}
 try:
     with open(DESKTOP / "smartsuite.config.json", encoding="utf-8") as _f:
@@ -21,11 +19,16 @@ try:
 except Exception:
     _pyi = {}
 
-datas = [
-    (str(ROOT / "app"), "app"),
-    (str(ROOT / "defaults"), "defaults"),
-]
-# Recursos adicionales por-herramienta: ["carpeta", ...] relativos a la raíz del repo
+APP_DIR = ROOT / "app"
+if not APP_DIR.is_dir() or not (APP_DIR / "index.html").is_file():
+    print(f"FATAL: {APP_DIR}/index.html missing — desktop sidecar cannot serve UI.", file=sys.stderr)
+    raise SystemExit(1)
+
+datas = [(str(APP_DIR), "app")]
+_defaults = ROOT / "defaults"
+if _defaults.is_dir():
+    datas.append((str(_defaults), "defaults"))
+
 for _d in _pyi.get("extraDatas", []):
     _p = ROOT / _d
     if _p.exists():
@@ -46,6 +49,14 @@ hiddenimports = [
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
     "uvicorn.lifespan.off",
+    "database",
+    "models",
+    "orchestration",
+    "pipeline_agent",
+    "analytics",
+    "security",
+    "hardware",
+    "ollama_client",
 ]
 
 a = Analysis(

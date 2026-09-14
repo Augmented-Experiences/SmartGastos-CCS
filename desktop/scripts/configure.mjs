@@ -174,7 +174,7 @@ const capabilities = {
   identifier: "default",
   description: `Permisos base para la ventana principal de ${productName}.`,
   windows: ["main"],
-  permissions: ["core:default"],
+  permissions: ["core:default", "core:webview:allow-set-webview-url"],
 };
 writeFileSync(
   resolve(DESKTOP, "src-tauri/capabilities/default.json"),

@@ -64,30 +64,37 @@
     const enterBtn = document.getElementById('enter');
     const errorEl = document.getElementById('error');
 
-    let backendUrl = null;
     let navigated = false;
     let ollamaDone = false;
-    let canContinue = false;
-    let navigateTimer = null;
 
-    function goToApp() {
-      if (navigated || !backendUrl) return;
-      navigated = true;
-      window.location.replace(backendUrl);
-    }
+    // La navegacion al backend la hace Rust (WebviewWindow.navigate). No usar location.replace.
 
-    function maybeNavigate() {
-      if (navigated || !backendUrl || !canContinue || !ollamaDone) return;
-      if (!navigateTimer) {
-        navigateTimer = setTimeout(goToApp, 400);
+    async function enterApp() {
+      if (navigated) return;
+      const t = window.__TAURI__;
+      if (!t || !t.core) return;
+      try {
+        await t.core.invoke('navigate_to_backend');
+        navigated = true;
+        statusEl.textContent = 'Abriendo la aplicacion...';
+      } catch (e1) {
+        try {
+          await t.core.invoke('retry_backend');
+          navigated = true;
+          statusEl.textContent = 'Abriendo la aplicacion...';
+        } catch (e2) {
+          errorEl.textContent = String(e2);
+          errorEl.style.display = 'block';
+        }
       }
     }
 
     function render(s) {
       if (!s) return;
       if (s.message) statusEl.textContent = s.message;
-      if (s.backend_error) {
-        errorEl.textContent = s.backend_error;
+      const err = s.backendError ?? s.backend_error;
+      if (err) {
+        errorEl.textContent = err;
         errorEl.style.display = 'block';
       } else {
         errorEl.style.display = 'none';
@@ -100,34 +107,18 @@
         trackEl.classList.add('indeterminate');
         pctEl.textContent = '';
       }
-      if (s.backend_url) backendUrl = s.backend_url;
-      if (s.can_continue) canContinue = true;
-      if (s.ollama_done) {
+      const done = s.ollamaDone ?? s.ollama_done;
+      if (done) {
         ollamaDone = true;
         enterBtn.classList.add('show');
       }
-      maybeNavigate();
+      const can = s.canContinue ?? s.can_continue;
+      if (done && can && !navigated) {
+        enterApp();
+      }
     }
 
-    enterBtn.addEventListener('click', async () => {
-      if (navigated) return;
-      if (!backendUrl) {
-        const t = window.__TAURI__;
-        if (t && t.core) {
-          try {
-            backendUrl = await t.core.invoke('retry_backend');
-            canContinue = true;
-            errorEl.style.display = 'none';
-            goToApp();
-          } catch (e) {
-            errorEl.textContent = String(e);
-            errorEl.style.display = 'block';
-          }
-        }
-        return;
-      }
-      goToApp();
-    });
+    enterBtn.addEventListener('click', enterApp);
 
     function pollStatus() {
       const t = window.__TAURI__;

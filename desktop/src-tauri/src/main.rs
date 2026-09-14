@@ -11,7 +11,7 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{Emitter, Manager, RunEvent, WebviewUrl};
+use tauri::{Emitter, Manager, RunEvent, Url, WebviewUrl};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -43,8 +43,11 @@ fn app_config() -> &'static AppConfig {
 }
 
 struct BackendState(Mutex<Option<CommandChild>>);
+struct Navigated(Mutex<bool>);
+struct LastProbe(Mutex<String>);
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Status {
     phase: String,
     message: String,
@@ -89,13 +92,25 @@ fn current_status(state: tauri::State<AppStatus>) -> Status {
 }
 
 #[tauri::command]
+fn navigate_to_backend(
+    app: tauri::AppHandle,
+    port: tauri::State<BackendPort>,
+) -> Result<(), String> {
+    navigate_main_to_backend(&app, port.0)
+}
+
+#[tauri::command]
 fn retry_backend(app: tauri::AppHandle, port: tauri::State<BackendPort>) -> Result<String, String> {
     let p = port.0;
     if try_mark_backend_ready(&app, p) {
-        let url = backend_app_url(p);
-        Ok(url)
+        navigate_main_to_backend(&app, p)?;
+        Ok(backend_app_url(p))
     } else {
-        Err("El servidor aun no responde. Espere unos segundos o cierre la app por completo y vuelva a abrirla.".into())
+        let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
+        Err(format!(
+            "El servidor aun no responde con la UI. Diagnostico: {}",
+            detail
+        ))
     }
 }
 
@@ -203,30 +218,83 @@ fn wait_for_port(port: u16, attempts: u32) -> bool {
     false
 }
 
-/// URL de la app web (SmartGastos sirve index y assets en `/`, no en `/ui/`).
 fn backend_app_url(port: u16) -> String {
     format!("http://127.0.0.1:{}/", port)
 }
 
-fn http_ok(url: &str) -> bool {
-    match ureq::get(url).call() {
-        Ok(resp) => {
-            let s = resp.status();
-            s == 200 || s == 304 || s == 307 || s == 308
+struct ProbeResult {
+    ok: bool,
+    detail: String,
+}
+
+fn probe_backend(port: u16) -> ProbeResult {
+    let health_url = format!("http://127.0.0.1:{}/api/health", port);
+    let root_url = backend_app_url(port);
+    let health_status = match ureq::get(&health_url).call() {
+        Ok(r) => r.status(),
+        Err(e) => {
+            return ProbeResult {
+                ok: false,
+                detail: format!("GET /api/health error: {}", e),
+            };
         }
-        Err(_) => false,
+    };
+    if health_status != 200 {
+        return ProbeResult {
+            ok: false,
+            detail: format!("GET /api/health status {}", health_status),
+        };
+    }
+
+    let ui_url = format!("http://127.0.0.1:{}/api/desktop-ui", port);
+    if let Ok(r) = ureq::get(&ui_url).call() {
+        if r.status() == 200 {
+            if let Ok(body) = r.into_string() {
+                backend_log(&format!("/api/desktop-ui: {}", body));
+                if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false") {
+                    return ProbeResult {
+                        ok: false,
+                        detail: "sidecar sin app/index.html empaquetado (rebuild PyInstaller)".into(),
+                    };
+                }
+            }
+        }
+    }
+
+    match ureq::get(&root_url).call() {
+        Ok(r) => {
+            let status = r.status();
+            let body = r.into_string().unwrap_or_default();
+            let snippet: String = body.chars().take(120).collect();
+            if status == 200 && (body.contains("<!DOCTYPE") || body.contains("<html")) {
+                ProbeResult {
+                    ok: true,
+                    detail: "health 200 + HTML en /".into(),
+                }
+            } else {
+                ProbeResult {
+                    ok: false,
+                    detail: format!(
+                        "GET / status {} (no HTML). head={:?}",
+                        status,
+                        snippet
+                    ),
+                }
+            }
+        }
+        Err(e) => ProbeResult {
+            ok: false,
+            detail: format!("GET / error: {}", e),
+        },
     }
 }
 
-fn probe_backend_ready(port: u16) -> bool {
-    let health = format!("http://127.0.0.1:{}/api/health", port);
-    let root = backend_app_url(port);
-    http_ok(&health) || http_ok(&root)
-}
-
-fn wait_for_backend_ready(port: u16, attempts: u32) -> bool {
+fn wait_for_backend_ready(app: &tauri::AppHandle, port: u16, attempts: u32) -> bool {
     for _ in 0..attempts {
-        if probe_backend_ready(port) {
+        let probe = probe_backend(port);
+        *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
+        if probe.ok {
+            backend_log(&format!("backend ready: {}", probe.detail));
             return true;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -245,15 +313,66 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
             s.message = "Servicios listos.".into();
         }
     });
+    maybe_enter_app(app, port);
 }
 
 fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
-    if probe_backend_ready(port) {
+    let probe = probe_backend(port);
+    *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
+    backend_log(&format!("try_mark_backend_ready: {}", probe.detail));
+    if probe.ok {
         apply_backend_ready(app, port);
         true
     } else {
         false
     }
+}
+
+fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), String> {
+    if *app.state::<Navigated>().0.lock().unwrap() {
+        return Ok(());
+    }
+    let probe = probe_backend(port);
+    *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
+    if !probe.ok {
+        return Err(probe.detail);
+    }
+    let url_str = backend_app_url(port);
+    let parsed = Url::parse(&url_str).map_err(|e| format!("URL invalida: {}", e))?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "ventana main no encontrada".to_string())?;
+    window
+        .navigate(WebviewUrl::External(parsed))
+        .map_err(|e| format!("navigate fallo: {}", e))?;
+    *app.state::<Navigated>().0.lock().unwrap() = true;
+    backend_log(&format!("WebView navigate OK -> {}", url_str));
+    Ok(())
+}
+
+fn maybe_enter_app(app: &tauri::AppHandle, port: u16) {
+    let (ollama_done, can_continue) = {
+        let s = app.state::<AppStatus>().0.lock().unwrap();
+        (s.ollama_done, s.can_continue)
+    };
+    if !ollama_done || !can_continue {
+        backend_log(&format!(
+            "maybe_enter_app esperando (ollama_done={}, can_continue={})",
+            ollama_done,
+            can_continue
+        ));
+        return;
+    }
+    let app = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Err(e) = navigate_main_to_backend(&app, port) {
+            backend_log(&format!("maybe_enter_app navigate error: {}", e));
+            update_status(&app, |s| {
+                s.backend_error = Some(e);
+                s.phase = "warning".into();
+            });
+        }
+    });
 }
 
 fn model_for_ram() -> String {
@@ -328,7 +447,7 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
     if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
         try_mark_backend_ready(app, backend_port);
         if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
-            wait_for_backend_ready(backend_port, 120);
+            wait_for_backend_ready(app, backend_port, 120);
             try_mark_backend_ready(app, backend_port);
         }
     }
@@ -340,13 +459,30 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
             if s.backend_url.is_none() {
                 s.backend_url = Some(backend_app_url(backend_port));
             }
-        } else {
+        }
+    });
+
+    maybe_enter_app(app, backend_port);
+
+    if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
+        let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
+        update_status(app, |s| {
             s.phase = "warning".into();
-            s.backend_error = Some(
-                "El servidor no respondio (revise SmartGastos/logs en AppData). \
-Pulse Entrar para reintentar o cierre la app por completo y vuelva a abrirla."
-                    .into(),
-            );
+            s.backend_error = Some(format!(
+                "El servidor no respondio con la UI HTML. {}. Pulse Entrar para reintentar.",
+                detail
+            ));
+        });
+    }
+
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        if *app2.state::<Navigated>().0.lock().unwrap() {
+            return;
+        }
+        if app2.state::<AppStatus>().0.lock().unwrap().can_continue {
+            maybe_enter_app(&app2, backend_port);
         }
     });
 }
@@ -358,10 +494,6 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
             s.message = "Verificando el motor de IA (Ollama)...".into();
             s.percent = -1;
         });
-        ollama_log(&format!(
-            "== {}: preparando Ollama ==",
-            app_config().product_name
-        ));
 
         let installed = ollama_command()
             .arg("--version")
@@ -371,22 +503,11 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
             .map(|s| s.success())
             .unwrap_or(false);
         if !installed {
-            ollama_log("Ollama no instalado.");
-            update_status(&app, |s| {
-                s.phase = "warning".into();
-                s.message =
-                    "Ollama no esta instalado. La app abrira sin IA hasta que lo instale.".into();
-                s.percent = -1;
-            });
             finish_ollama_bootstrap(&app, backend_port);
             return;
         }
 
         if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
-            update_status(&app, |s| {
-                s.message = "Iniciando el servicio de IA...".into();
-                s.percent = -1;
-            });
             let mut cmd = ollama_command();
             cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
             let _ = cmd.spawn();
@@ -394,31 +515,14 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
         }
 
         let model = model_for_ram();
-        update_status(&app, |s| {
-            s.phase = "downloading".into();
-            s.message = format!("Descargando el modelo {} (solo la primera vez)...", model);
-            s.percent = -1;
-        });
-        let ok = pull_model_with_progress(&app, &model);
-        if ok {
-            update_status(&app, |s| {
-                s.message = format!("Modelo {} listo.", model);
-                s.percent = 100;
-            });
-        }
+        pull_model_with_progress(&app, &model);
 
         for extra in &app_config().extra_models {
+            pull_model_with_progress(&app, extra);
             update_status(&app, |s| {
-                s.phase = "downloading".into();
-                s.message = format!("Descargando componente de IA {}...", extra);
-                s.percent = -1;
+                s.message = format!("Componente {} listo.", extra);
+                s.percent = 100;
             });
-            if pull_model_with_progress(&app, extra) {
-                update_status(&app, |s| {
-                    s.message = format!("Componente {} listo.", extra);
-                    s.percent = 100;
-                });
-            }
         }
 
         finish_ollama_bootstrap(&app, backend_port);
@@ -426,6 +530,7 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
 }
 
 fn reset_splash_webview(app: &tauri::AppHandle) {
+    *app.state::<Navigated>().0.lock().unwrap() = false;
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.navigate(WebviewUrl::App("index.html".into()));
     }
@@ -436,7 +541,13 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendState(Mutex::new(None)))
         .manage(AppStatus(Mutex::new(Status::initial())))
-        .invoke_handler(tauri::generate_handler![current_status, retry_backend])
+        .manage(Navigated(Mutex::new(false)))
+        .manage(LastProbe(Mutex::new(String::new())))
+        .invoke_handler(tauri::generate_handler![
+            current_status,
+            retry_backend,
+            navigate_to_backend
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
             reset_splash_webview(&handle);
@@ -452,6 +563,7 @@ fn main() {
                 Ok(cmd) => match cmd
                     .env("PORT", port.to_string())
                     .env("DATA_DIR", data_dir)
+                    .env("RUN_BY_TAURI", "1")
                     .spawn()
                 {
                     Ok((mut rx, child)) => {
@@ -493,7 +605,7 @@ fn main() {
 
             let ready_handle = handle.clone();
             std::thread::spawn(move || {
-                if wait_for_backend_ready(port, 3600) {
+                if wait_for_backend_ready(&ready_handle, port, 3600) {
                     apply_backend_ready(&ready_handle, port);
                 }
             });

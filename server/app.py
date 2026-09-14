@@ -1762,14 +1762,49 @@ async def reset_agents():
 # Servir archivos estáticos de la UI
 # ============================================================
 
-# UI estática: /api/* primero; luego /ui (Pinokio) y / (instalador Tauri / WebView).
-_APP_DIR = BASE_DIR / "app"
-if _APP_DIR.exists():
+def _resolve_app_dir() -> Path:
+    """Ruta a app/ (index.html). En PyInstaller suele ser sys._MEIPASS/app."""
+    candidates: list[Path] = []
+    if _IS_FROZEN:
+        meipass = Path(getattr(sys, "_MEIPASS", str(BASE_DIR)))
+        candidates.append(meipass / "app")
+    candidates.extend(
+        [
+            BASE_DIR / "app",
+            Path(__file__).resolve().parent.parent / "app",
+        ]
+    )
+    for c in candidates:
+        if (c / "index.html").is_file():
+            return c.resolve()
+    return (BASE_DIR / "app").resolve()
+
+
+_APP_DIR = _resolve_app_dir()
+_INDEX_HTML = _APP_DIR / "index.html"
+print(
+    f"INFO: UI_DIR   = {_APP_DIR} (frozen={_IS_FROZEN}, "
+    f"index_exists={_INDEX_HTML.is_file()})"
+)
+
+
+@app.get("/api/desktop-ui")
+async def desktop_ui_status():
+    """Diagnóstico para el instalador Tauri (UI empaquetada en el sidecar)."""
+    return {
+        "frozen": _IS_FROZEN,
+        "baseDir": str(BASE_DIR),
+        "appDir": str(_APP_DIR),
+        "indexExists": _INDEX_HTML.is_file(),
+        "port": PORT,
+    }
+
+
+if _INDEX_HTML.is_file():
     app.mount("/ui", StaticFiles(directory=str(_APP_DIR), html=True), name="ui")
-    # Rutas relativas en index.html (vendor/, fonts/, ...) resuelven desde la raíz.
     app.mount("/", StaticFiles(directory=str(_APP_DIR), html=True), name="ui_root")
 else:
-    print(f"WARNING: Directorio UI no encontrado en {_APP_DIR}")
+    print(f"WARNING: index.html no encontrado en {_APP_DIR}")
 
     @app.get("/")
     async def root_missing_ui():
