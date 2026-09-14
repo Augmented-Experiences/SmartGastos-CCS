@@ -256,10 +256,34 @@ class TestUIFiles(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "icon.png").exists())
 
     def test_logo_exists(self):
-        """Debe existir logo.svg o logo.png en app/."""
-        has_logo = (REPO_ROOT / "app" / "logo.svg").exists() or \
-                   (REPO_ROOT / "app" / "logo.png").exists()
-        self.assertTrue(has_logo, "Debe existir logo.svg o logo.png en app/")
+        """Debe existir isotipo CCCE (logo-ccce) o logo legacy en app/."""
+        app_dir = REPO_ROOT / "app"
+        has_logo = (
+            (app_dir / "logo-ccce.png").exists()
+            or (app_dir / "logo.svg").exists()
+            or (app_dir / "logo.png").exists()
+        )
+        self.assertTrue(has_logo, "Debe existir logo-ccce.png, logo.svg o logo.png en app/")
+
+    def test_desktop_smartsuite_config(self):
+        cfg_path = REPO_ROOT / "desktop" / "smartsuite.config.json"
+        self.assertTrue(cfg_path.exists(), "Falta desktop/smartsuite.config.json")
+        import json
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        self.assertEqual(cfg.get("productName"), "SmartGastos")
+        self.assertEqual(cfg.get("accent"), "#2E9E3F")
+        extra = (cfg.get("ollama") or {}).get("extraModels") or []
+        self.assertIn("moondream", extra)
+
+    def test_requirements_desktop_no_easyocr(self):
+        lines = [
+            ln.strip().lower()
+            for ln in (REPO_ROOT / "requirements-desktop.txt").read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        joined = "\n".join(lines)
+        self.assertNotIn("easyocr", joined)
+        self.assertNotIn("torch", joined)
 
 
 if __name__ == '__main__':

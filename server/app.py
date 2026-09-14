@@ -1,8 +1,9 @@
 """
-Servidor principal del plugin pyme-ledger-ai.
-API FastAPI con endpoints para empresas, documentos, analítica y exportación.
+SmartGastos — Backend FastAPI (plugin Pinokio + sidecar desktop SmartSuite).
+API para empresas, documentos, analítica y exportación.
 """
 import os
+import sys
 import json
 import uuid
 import re as _re_mod
@@ -51,11 +52,45 @@ from ollama_client import (
     TIMEOUT_CHAT, TIMEOUT_CLASSIFICATION
 )
 
-# Configuración — rutas absolutas desde __file__ (requerido por Pinokio)
-# server/app.py → parent = server/ → parent.parent = raíz del plugin
-BASE_DIR = Path(__file__).parent.parent.resolve()
+# Configuración de rutas
+#   - Modo normal (Pinokio / dev): rutas relativas al código fuente.
+#   - Modo empaquetado (PyInstaller / instalador Tauri): recursos de solo
+#     lectura en sys._MEIPASS; datos escribibles en DATA_DIR (env) o carpeta
+#     de usuario SmartGastos.
+_IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _user_data_dir() -> Path:
+    app_name = "SmartGastos"
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or (Path.home() / "AppData" / "Roaming")
+        return Path(base) / app_name
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / app_name
+    base = os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share")
+    return Path(base) / app_name
+
+
+if _IS_FROZEN:
+    BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)).resolve()
+else:
+    BASE_DIR = Path(__file__).parent.parent.resolve()
+
 PORT = int(os.environ.get("PORT", 8000))
-DATA_DIR = Path(os.environ.get("DATA_DIR", str(BASE_DIR / "data")))
+_raw_data_dir = os.environ.get("DATA_DIR", "")
+if _raw_data_dir and "{{" not in _raw_data_dir and Path(_raw_data_dir).is_absolute():
+    DATA_DIR = Path(_raw_data_dir)
+elif _IS_FROZEN:
+    DATA_DIR = _user_data_dir()
+else:
+    DATA_DIR = BASE_DIR / "data"
+    if _raw_data_dir and "{{" in _raw_data_dir:
+        import logging as _early_log
+        _early_log.getLogger(__name__).warning(
+            "DATA_DIR contiene plantilla Pinokio sin resolver: %s. "
+            "Usando fallback: %s", _raw_data_dir, DATA_DIR
+        )
+
 PLUGIN_DIR = Path(os.environ.get("PLUGIN_DIR", str(BASE_DIR)))
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,7 +102,7 @@ print(f"INFO: PORT      = {PORT}")
 # Inicializar BD
 init_db()
 
-app = FastAPI(title="Pyme Ledger AI", version="1.6.0")
+app = FastAPI(title="SmartGastos", version="1.6.0")
 
 # CORS restringido a loopback (plugin on-premise, compatible cross-platform)
 _ALLOWED_ORIGINS = [

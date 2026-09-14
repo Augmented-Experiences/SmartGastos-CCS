@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>CCS — Pyme Ledger AI | Clasificación de Gastos</title>
+<title>SmartGastos — Cámara Colombiana de Comercio Electrónico (CCCE)</title>
 <script src="vendor/chart.umd.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN SYSTEM — Pyme Ledger AI (CCS Theme)
+   DESIGN SYSTEM — SmartGastos (CCCE SmartSuite)
 ═══════════════════════════════════════════════════════════════ */
-/* ===== FUENTES CCS ===== */
+/* ===== FUENTES CCCE ===== */
 @font-face {
   font-family: 'DM Sans';
   src: url('fonts/DMSans-Regular.ttf') format('truetype');
@@ -43,12 +43,16 @@
 }
 
 :root {
-  /* === Paleta CCS 2025 === */
-  --ccs-azul-oscuro:   #0D3DA6;
-  --ccs-verde:         #3DAE2B;
-  --ccs-azul:          #0D56CA;
-  --ccs-celeste:       #3A6DDE;
-  --ccs-verde-brillante: #0DD700;
+  /* === Paleta CCCE (isotipo compartido; acento SmartGastos) === */
+  --ccs-azul-oscuro:   #173A7A;
+  --ccs-verde:         #2E9E3F;
+  --ccs-azul:          #1E56A8;
+  --ccs-celeste:       #2E6FC0;
+  --ccs-verde-brillante: #38C049;
+  --ccce-rojo:         #CE1126;
+  --ccce-dorado:       #F4C10E;
+  --ccce-accent:       #2E9E3F;
+  --ccce-accent-strong:#268833;
 
   /* === Variables de UI (tema claro) === */
   --bg:       #F7F8FA;
@@ -60,10 +64,10 @@
   --border2:  #B8C8E4;
   --border3:  #9BB0D4;
 
-  --accent:   #0D3DA6;
-  --accent2:  #0D56CA;
-  --accent3:  #3A6DDE;
-  --accent-glow: rgba(13,61,166,.15);
+  --accent:   #2E9E3F;
+  --accent2:  #268833;
+  --accent3:  #38C049;
+  --accent-glow: rgba(46,158,63,.18);
 
   --green:    #3DAE2B;
   --green2:   #2D8A1E;
@@ -129,6 +133,8 @@ a:hover { text-decoration: underline; }
   overflow: hidden;
   transition: width .25s ease;
   box-shadow: var(--shadow-sm);
+  border-top: 3px solid transparent;
+  border-image: linear-gradient(90deg, var(--ccs-azul-oscuro) 0 40%, var(--ccce-rojo) 40% 70%, var(--ccce-accent) 70% 100%) 1;
 }
 .sidebar-logo {
   padding: 16px 14px 14px;
@@ -1302,7 +1308,7 @@ a:hover { text-decoration: underline; }
 <!-- Global Loading Overlay -->
 <div class="global-overlay" id="globalOverlay">
   <div class="spinner-lg"></div>
-  <div class="overlay-text" id="overlayText">Iniciando Pyme Ledger AI...</div>
+  <div class="overlay-text" id="overlayText">Iniciando SmartGastos...</div>
   <div class="overlay-sub" id="overlaySub">Verificando motor de IA y servidor</div>
 </div>
 
@@ -1312,11 +1318,11 @@ a:hover { text-decoration: underline; }
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <img src="logo.svg" alt="CCS" class="sidebar-logo-img" />
+      <img src="logo-ccce.png" alt="SmartGastos — CCCE" class="sidebar-logo-img" />
       <div class="sidebar-logo-divider"></div>
       <div>
-        <div class="logo-text">Pyme Ledger AI</div>
-        <div class="logo-sub">Clasificación de Gastos</div>
+        <div class="logo-text">SmartGastos</div>
+        <div class="logo-sub">Gestión de gastos · CCCE</div>
       </div>
     </div>
     <div class="sidebar-emp" onclick="showSection('admin')">
@@ -1511,7 +1517,7 @@ let state = {
 // INIT
 // ═══════════════════════════════════════════════════════════════
 async function init() {
-  showOverlay('Iniciando Pyme Ledger AI...', 'Conectando con el servidor...');
+  showOverlay('Iniciando SmartGastos...', 'Conectando con el servidor...');
   try {
     // Paso 1: Verificar servidor
     showOverlay('Verificando servidor...', 'Conectando con la API...');
