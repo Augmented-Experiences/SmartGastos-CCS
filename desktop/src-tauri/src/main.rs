@@ -179,15 +179,9 @@ fn ollama_log(line: &str) {
     }
 }
 
+/// Mismo archivo que los mensajes de Ollama (`logs/ollama.log` bajo APPDATA/SmartGastos).
 fn backend_log(line: &str) {
-    let path = log_dir().join("backend.log");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-    {
-        let _ = writeln!(f, "{}", line);
-    }
+    ollama_log(line);
 }
 
 fn kill_backend_child(state: &BackendState) {
@@ -250,7 +244,7 @@ fn probe_backend(port: u16) -> ProbeResult {
     if let Ok(r) = ureq::get(&ui_url).call() {
         if r.status() == 200 {
             if let Ok(body) = r.into_string() {
-                backend_log(&format!("/api/desktop-ui: {}", body));
+                ollama_log(&format!("/api/desktop-ui: {}", body));
                 if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false") {
                     return ProbeResult {
                         ok: false,
@@ -294,7 +288,7 @@ fn wait_for_backend_ready(app: &tauri::AppHandle, port: u16, attempts: u32) -> b
         let probe = probe_backend(port);
         *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
         if probe.ok {
-            backend_log(&format!("backend ready: {}", probe.detail));
+            ollama_log(&format!("sidecar listo: {}", probe.detail));
             return true;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -319,7 +313,7 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
 fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
     let probe = probe_backend(port);
     *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
-    backend_log(&format!("try_mark_backend_ready: {}", probe.detail));
+    ollama_log(&format!("probe try_mark_backend_ready: {}", probe.detail));
     if probe.ok {
         apply_backend_ready(app, port);
         true
@@ -346,33 +340,55 @@ fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), Str
         .navigate(WebviewUrl::External(parsed))
         .map_err(|e| format!("navigate fallo: {}", e))?;
     *app.state::<Navigated>().0.lock().unwrap() = true;
-    backend_log(&format!("WebView navigate OK -> {}", url_str));
+    ollama_log(&format!("WebView navigate OK -> {}", url_str));
     Ok(())
 }
 
 fn maybe_enter_app(app: &tauri::AppHandle, port: u16) {
-    let (ollama_done, can_continue) = {
-        let s = app.state::<AppStatus>().0.lock().unwrap();
-        (s.ollama_done, s.can_continue)
-    };
-    if !ollama_done || !can_continue {
-        backend_log(&format!(
-            "maybe_enter_app esperando (ollama_done={}, can_continue={})",
-            ollama_done,
-            can_continue
-        ));
+    let ollama_done = app.state::<AppStatus>().0.lock().unwrap().ollama_done;
+    if !ollama_done {
+        ollama_log("maybe_enter_app: esperando ollama_done");
         return;
     }
     let app = app.clone();
-    let _ = app.run_on_main_thread(move || {
+    ollama_log("maybe_enter_app: encolando navigate en hilo principal");
+    match app.run_on_main_thread(move || {
         if let Err(e) = navigate_main_to_backend(&app, port) {
-            backend_log(&format!("maybe_enter_app navigate error: {}", e));
+            ollama_log(&format!("navigate error: {}", e));
             update_status(&app, |s| {
-                s.backend_error = Some(e);
+                s.backend_error = Some(format!(
+                    "{}. Pulse «Entrar ahora» para reintentar.",
+                    e
+                ));
                 s.phase = "warning".into();
             });
         }
-    });
+    }) {
+        Ok(()) => ollama_log("run_on_main_thread: OK"),
+        Err(e) => ollama_log(&format!("run_on_main_thread: {}", e)),
+    }
+}
+
+fn force_post_ollama_navigate(app: &tauri::AppHandle, port: u16) {
+    let probe = probe_backend(port);
+    *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
+    ollama_log(&format!(
+        "probe final: ok={} {}",
+        probe.ok,
+        probe.detail
+    ));
+    if probe.ok {
+        let _ = try_mark_backend_ready(app, port);
+    } else {
+        update_status(app, |s| {
+            s.phase = "warning".into();
+            s.backend_error = Some(format!(
+                "El servidor local no respondio con la UI HTML. {}. Pulse «Entrar ahora» para reintentar.",
+                probe.detail
+            ));
+        });
+    }
+    maybe_enter_app(app, port);
 }
 
 fn model_for_ram() -> String {
@@ -444,16 +460,19 @@ fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
 }
 
 fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
+    ollama_log("== finish_ollama_bootstrap (post extra_models)");
     if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
-        try_mark_backend_ready(app, backend_port);
+        ollama_log("esperando sidecar (probe /api/health + / + /api/desktop-ui)...");
+        let _ = try_mark_backend_ready(app, backend_port);
         if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
             wait_for_backend_ready(app, backend_port, 120);
-            try_mark_backend_ready(app, backend_port);
+            let _ = try_mark_backend_ready(app, backend_port);
         }
     }
 
     update_status(app, |s| {
         s.ollama_done = true;
+        s.percent = 100;
         if s.can_continue {
             s.phase = "ready".into();
             if s.backend_url.is_none() {
@@ -462,27 +481,18 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
         }
     });
 
-    maybe_enter_app(app, backend_port);
-
-    if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
-        let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
-        update_status(app, |s| {
-            s.phase = "warning".into();
-            s.backend_error = Some(format!(
-                "El servidor no respondio con la UI HTML. {}. Pulse Entrar para reintentar.",
-                detail
-            ));
-        });
-    }
+    force_post_ollama_navigate(app, backend_port);
 
     let app2 = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(3));
-        if *app2.state::<Navigated>().0.lock().unwrap() {
-            return;
-        }
-        if app2.state::<AppStatus>().0.lock().unwrap().can_continue {
-            maybe_enter_app(&app2, backend_port);
+        for delay in [1u64, 3, 5] {
+            std::thread::sleep(Duration::from_secs(delay));
+            if *app2.state::<Navigated>().0.lock().unwrap() {
+                ollama_log("reintento post-ollama: ya navegado");
+                return;
+            }
+            ollama_log(&format!("reintento post-ollama navegacion (+{}s)", delay));
+            force_post_ollama_navigate(&app2, backend_port);
         }
     });
 }
@@ -519,12 +529,14 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
 
         for extra in &app_config().extra_models {
             pull_model_with_progress(&app, extra);
+            ollama_log(&format!("Modelo adicional '{}' listo.", extra));
             update_status(&app, |s| {
                 s.message = format!("Componente {} listo.", extra);
                 s.percent = 100;
             });
         }
 
+        ollama_log("extra_models terminado; entrando a finish_ollama_bootstrap");
         finish_ollama_bootstrap(&app, backend_port);
     });
 }
@@ -555,7 +567,7 @@ fn main() {
             kill_backend_child(app.state::<BackendState>());
             let port = pick_port();
             app.manage(BackendPort(port));
-            backend_log(&format!("Puerto backend elegido: {}", port));
+            ollama_log(&format!("Puerto backend elegido: {}", port));
 
             let data_dir = user_data_dir().to_string_lossy().to_string();
             let sidecar = app.shell().sidecar("backend");

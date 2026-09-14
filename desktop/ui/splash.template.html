@@ -35,14 +35,19 @@
     .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
     .pct { color: var(--gold); font-weight: 700; font-size: 13px; min-height: 16px; }
     .enter {
-      margin-top: 6px; padding: 9px 22px; border-radius: 10px; border: 0; cursor: pointer;
+      margin-top: 12px; padding: 14px 32px; border-radius: 12px; border: 0; cursor: pointer;
       background: linear-gradient(135deg, var(--gold), #E0A800); color: var(--navy);
-      font-weight: 700; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+      font-weight: 800; font-size: 18px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
     }
     .enter.show { opacity: 1; pointer-events: auto; }
-    .enter:hover { filter: brightness(1.05); }
+    .enter:hover { filter: brightness(1.08); transform: scale(1.02); }
     .foot { position: absolute; bottom: 18px; color: #9fb2d6; font-size: 11px; }
-    .error { color: #ffb4b4; font-size: 13px; max-width: 480px; line-height: 1.45; display: none; }
+    .error {
+      color: #ffcccc; font-size: 15px; font-weight: 600; max-width: 520px; line-height: 1.5;
+      display: none; padding: 12px 16px; background: rgba(80,0,0,0.35); border-radius: 10px;
+      border: 1px solid rgba(255,120,120,0.45);
+    }
   </style>
 </head>
 <body>
@@ -112,8 +117,7 @@
         ollamaDone = true;
         enterBtn.classList.add('show');
       }
-      const can = s.canContinue ?? s.can_continue;
-      if (done && can && !navigated) {
+      if (done && !navigated) {
         enterApp();
       }
     }
