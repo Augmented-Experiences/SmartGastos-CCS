@@ -1,15 +1,13 @@
 param(
-  [switch]$Installer  # Si se pasa, continúa con 'npm run build' en desktop/ (MSI + setup.exe)
+  [switch]$Installer  # If set, runs 'npm run build' in desktop/ (MSI + setup.exe)
 )
 
 # ============================================================
-# build-backend.ps1 — Empaqueta el backend FastAPI (sidecar Tauri)
-# en un binario único (sidecar de Tauri) con PyInstaller (Windows)
-# y lo coloca en desktop/src-tauri/binaries con el sufijo del target.
+# build-backend.ps1 - Package FastAPI backend (Tauri sidecar)
+# with PyInstaller (Windows) into desktop/src-tauri/binaries.
 #
-# Requiere Python 3.10–3.12 (recomendado 3.12). Con 3.13/3.14 las
-# dependencias pinneadas (numpy 1.26.4) no tienen wheels y pip intentaría
-# compilarlas desde el código fuente, lo que falla en Windows.
+# Requires Python 3.10-3.12 (3.12 recommended). On 3.13/3.14 pinned
+# deps (numpy 1.26.4) may lack wheels and pip will try to compile.
 # ============================================================
 $ErrorActionPreference = "Stop"
 
@@ -18,91 +16,88 @@ $Desktop = Split-Path -Parent $Here
 $Root = Split-Path -Parent $Desktop
 Set-Location $Root
 
-# --- Verificar Rust (se usa para el target triple y luego para 'npm run build') ---
+# --- Rust (target triple + later 'npm run build') ---
 if (-not (Get-Command rustc -ErrorAction SilentlyContinue)) {
     Write-Host ""
-    Write-Host "ERROR: no se encontró 'rustc' (Rust) en el PATH." -ForegroundColor Red
-    Write-Host "       Rust es necesario para nombrar el sidecar y para compilar la app Tauri." -ForegroundColor Yellow
+    Write-Host "ERROR: 'rustc' (Rust) not found on PATH." -ForegroundColor Red
+    Write-Host "       Rust is required for the sidecar name and Tauri build." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  Solución:" -ForegroundColor Cyan
+    Write-Host "  Fix:" -ForegroundColor Cyan
     Write-Host "    winget install -e --id Rustlang.Rustup" -ForegroundColor Cyan
-    Write-Host "    # cierra y reabre PowerShell (para refrescar el PATH), luego:" -ForegroundColor Cyan
+    Write-Host "    # restart PowerShell, then:" -ForegroundColor Cyan
     Write-Host "    rustup default stable-msvc" -ForegroundColor Cyan
-    throw "Rust no está instalado o no está en el PATH."
+    throw "Rust is not installed or not on PATH."
 }
 
-# --- Seleccionar intérprete de Python ---
+# --- Python interpreter ---
 $Py = $null
 if (Test-Path "venv\Scripts\python.exe") {
     $Py = "venv\Scripts\python.exe"
 } elseif (Get-Command py -ErrorAction SilentlyContinue) {
-    # Preferir explícitamente 3.12 vía el Python launcher
     try { & py -3.12 --version *> $null; if ($LASTEXITCODE -eq 0) { $Py = "py -3.12" } } catch {}
     if (-not $Py) { $Py = "py" }
 } elseif (Get-Command python -ErrorAction SilentlyContinue) {
     $Py = "python"
 } else {
-    throw "No se encontró Python. Instala Python 3.12 (https://www.python.org/downloads/)."
+    throw "Python not found. Install Python 3.12 (https://www.python.org/downloads/)."
 }
 
-# --- Validar versión soportada (3.10–3.12) ---
+# --- Supported Python 3.10-3.12 ---
 $verRaw = & cmd /c "$Py -c ""import sys;print('%d.%d'%sys.version_info[:2])"""
 $parts = $verRaw.Trim().Split('.')
 $major = [int]$parts[0]; $minor = [int]$parts[1]
 if ($major -ne 3 -or $minor -lt 10 -or $minor -gt 12) {
     Write-Host ""
-    Write-Host "ERROR: Python $verRaw no es compatible para empaquetar el backend." -ForegroundColor Red
-    Write-Host "       Las dependencias pinneadas (numpy 1.26.4) solo tienen wheels" -ForegroundColor Yellow
-    Write-Host "       para Python 3.10-3.12. Con 3.13/3.14 pip compila desde fuente y falla." -ForegroundColor Yellow
+    Write-Host "ERROR: Python $verRaw is not supported for packaging the backend." -ForegroundColor Red
+    Write-Host "       Pinned deps (numpy 1.26.4) only have wheels for 3.10-3.12." -ForegroundColor Yellow
+    Write-Host "       On 3.13/3.14 pip may compile from source and fail." -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "  Solución:" -ForegroundColor Cyan
+    Write-Host "  Fix:" -ForegroundColor Cyan
     Write-Host "    winget install -e --id Python.Python.3.12" -ForegroundColor Cyan
     Write-Host "    Remove-Item -Recurse -Force venv" -ForegroundColor Cyan
     Write-Host "    py -3.12 -m venv venv" -ForegroundColor Cyan
     Write-Host "    venv\Scripts\python -m pip install -r requirements.txt pyinstaller" -ForegroundColor Cyan
     Write-Host "    powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1" -ForegroundColor Cyan
-    throw "Versión de Python no soportada: $verRaw (usa 3.12)."
+    throw "Unsupported Python version: $verRaw (use 3.12)."
 }
-Write-Host "==> Usando Python $verRaw ($Py)"
+Write-Host "==> Using Python $verRaw ($Py)"
 
-# Usa requirements-desktop.txt (subconjunto liviano, sin deps pesadas opcionales
-# como torch/easyocr) si existe; si no, cae a requirements.txt.
 $Req = "requirements.txt"
 if (Test-Path "requirements-desktop.txt") { $Req = "requirements-desktop.txt" }
-Write-Host "==> Instalando dependencias de build desde $Req (+ PyInstaller)"
+Write-Host "==> Installing build deps from $Req (+ PyInstaller)"
 & cmd /c "$Py -m pip install --quiet -r $Req pyinstaller"
 
-Write-Host "==> Empaquetando backend con PyInstaller"
+Write-Host "==> Packaging backend with PyInstaller"
 & cmd /c "$Py -m PyInstaller --clean --noconfirm --distpath desktop/backend/dist --workpath desktop/backend/build desktop/backend/backend.spec"
 
 $Triple = ((rustc -vV | Select-String "host: ") -replace "host: ", "").Trim()
 New-Item -ItemType Directory -Force -Path desktop/src-tauri/binaries | Out-Null
 Copy-Item "desktop/backend/dist/backend.exe" "desktop/src-tauri/binaries/backend-$Triple.exe" -Force
-Write-Host "==> Sidecar listo: desktop/src-tauri/binaries/backend-$Triple.exe"
+Write-Host "==> Sidecar ready: desktop/src-tauri/binaries/backend-$Triple.exe"
 Write-Host ""
 if ($Installer) {
-  Write-Host "==> Compilando instalador Tauri (MSI + NSIS setup.exe)…" -ForegroundColor Cyan
+  Write-Host "==> Building Tauri installer (MSI + NSIS setup.exe)..." -ForegroundColor Cyan
   Set-Location $Desktop
   if (-not (Test-Path "node_modules")) {
     Write-Host "==> npm install (desktop)"
     npm install
   }
   if (-not (Test-Path "src-tauri/icons/icon.ico")) {
-    Write-Host "==> Generando iconos (npm run icon) — solo la primera vez"
+    Write-Host "==> Generating icons (npm run icon) - first time only"
     npm run icon
   }
   npm run build
   Write-Host ""
-  Write-Host "Instaladores:" -ForegroundColor Green
+  Write-Host "Installers:" -ForegroundColor Green
   Write-Host "  $Desktop\src-tauri\target\release\bundle\msi\*.msi"
   Write-Host "  $Desktop\src-tauri\target\release\bundle\nsis\*-setup.exe"
 } else {
-  Write-Host "Siguiente paso (instalador .msi / *-setup.exe, no solo el sidecar):" -ForegroundColor Yellow
+  Write-Host "Next step (.msi / *-setup.exe, not just the sidecar):" -ForegroundColor Yellow
   Write-Host "  cd desktop"
   Write-Host "  npm install"
-  Write-Host "  npm run icon    # una sola vez"
+  Write-Host "  npm run icon    # once"
   Write-Host "  npm run build"
   Write-Host ""
-  Write-Host "O en un solo paso desde la raíz del repo:" -ForegroundColor Yellow
+  Write-Host "Or one step from repo root:" -ForegroundColor Yellow
   Write-Host "  powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1 -Installer"
 }
