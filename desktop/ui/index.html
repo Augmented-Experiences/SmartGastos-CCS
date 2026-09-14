@@ -1,18 +1,15 @@
 <!--
   PLANTILLA DE SPLASH (editar aqui; no index.html — lo genera configure.mjs)
 
-  - Texto / marca: desktop/smartsuite.config.json (productName, splashSubtitle, accent)
-  - Logo: splashLogo en smartsuite.config.json (ruta relativa a desktop/) o ../icon.png en la raiz del repo
-  - Layout y estilos: bloque <style> y clases .brand / .splash-logo / .track abajo
-  - Placeholders: SmartCaja, Smart<span class="accent">Caja</span>, Preparando tu asistente de flujo de caja con IA local..., <img class="splash-logo" src="splash-logo.png" alt="SmartCaja" />
-  
+  En desktop Tauri: se sirve desde FastAPI en /__splash (mismo origen que la app).
+  Tras Ollama: location.replace('/') — sin WebviewWindow.navigate ni invoke.
 -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SmartCaja</title>
+  <title>SmartGastos</title>
   <link rel="stylesheet" href="ccce-theme.css" />
   <link rel="stylesheet" href="accent.css" />
   <style>
@@ -52,10 +49,10 @@
   </style>
 </head>
 <body>
-  <img class="splash-logo" src="splash-logo.png" alt="SmartCaja" />
+  <img class="splash-logo" src="splash-logo.png" alt="SmartGastos" />
   
-  <div class="brand">Smart<span class="accent">Caja</span></div>
-  <div class="sub">Preparando tu asistente de flujo de caja con IA local...</div>
+  <div class="brand">Smart<span class="accent">Gastos</span></div>
+  <div class="sub">Preparando tu asistente de gastos y contabilidad con IA local...</div>
   <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
   <div class="pct" id="pct"></div>
   <div class="status" id="status">Iniciando servicios...</div>
@@ -72,28 +69,27 @@
     const errorEl = document.getElementById('error');
 
     let navigated = false;
-    let ollamaDone = false;
 
-    // La navegacion al backend la hace Rust (WebviewWindow.navigate). No usar location.replace.
+    /** Splash servido por FastAPI (mismo origen 127.0.0.1). */
+    const onBackendSplash =
+      location.hostname === '127.0.0.1' &&
+      (location.pathname === '/__splash' || location.pathname.startsWith('/__splash/'));
 
-    async function enterApp() {
+    function enterApp() {
       if (navigated) return;
+      navigated = true;
+      statusEl.textContent = 'Abriendo la aplicacion...';
+      if (onBackendSplash) {
+        window.location.replace('/');
+        return;
+      }
       const t = window.__TAURI__;
       if (!t || !t.core) return;
-      try {
-        await t.core.invoke('navigate_to_backend');
-        navigated = true;
-        statusEl.textContent = 'Abriendo la aplicacion...';
-      } catch (e1) {
-        try {
-          await t.core.invoke('retry_backend');
-          navigated = true;
-          statusEl.textContent = 'Abriendo la aplicacion...';
-        } catch (e2) {
-          errorEl.textContent = String(e2);
-          errorEl.style.display = 'block';
-        }
-      }
+      t.core.invoke('navigate_to_backend').catch((e) => {
+        errorEl.textContent = String(e);
+        errorEl.style.display = 'block';
+        navigated = false;
+      });
     }
 
     function render(s) {
@@ -103,7 +99,7 @@
       if (err) {
         errorEl.textContent = err;
         errorEl.style.display = 'block';
-      } else {
+      } else if (!navigated) {
         errorEl.style.display = 'none';
       }
       if (typeof s.percent === 'number' && s.percent >= 0) {
@@ -115,36 +111,44 @@
         pctEl.textContent = '';
       }
       const done = s.ollamaDone ?? s.ollama_done;
-      if (done) {
-        ollamaDone = true;
-        enterBtn.classList.add('show');
-      }
-      if (done && !navigated) {
-        enterApp();
-      }
+      if (done) enterBtn.classList.add('show');
+      if (done && !navigated) enterApp();
     }
 
     enterBtn.addEventListener('click', enterApp);
 
-    function pollStatus() {
+    function pollHttpStatus() {
+      if (navigated) return;
+      fetch('/api/desktop-status', { cache: 'no-store' })
+        .then((r) => r.json())
+        .then(render)
+        .catch(() => {});
+    }
+
+    function pollTauriStatus() {
       const t = window.__TAURI__;
       if (!t || !t.core || navigated) return;
       t.core.invoke('current_status').then(render).catch(() => {});
     }
 
-    function initTauri() {
-      const t = window.__TAURI__;
-      if (!t || !t.event || !t.core) { return false; }
-      pollStatus();
-      t.event.listen('status', (e) => render(e.payload));
-      setInterval(pollStatus, 2000);
-      return true;
-    }
-    if (!initTauri()) {
-      let tries = 0;
-      const iv = setInterval(() => {
-        if (initTauri() || ++tries > 50) clearInterval(iv);
-      }, 100);
+    if (onBackendSplash) {
+      pollHttpStatus();
+      setInterval(pollHttpStatus, 1000);
+    } else {
+      function initTauri() {
+        const t = window.__TAURI__;
+        if (!t || !t.event || !t.core) return false;
+        pollTauriStatus();
+        t.event.listen('status', (e) => render(e.payload));
+        setInterval(pollTauriStatus, 2000);
+        return true;
+      }
+      if (!initTauri()) {
+        let tries = 0;
+        const iv = setInterval(() => {
+          if (initTauri() || ++tries > 50) clearInterval(iv);
+        }, 100);
+      }
     }
   </script>
 </body>

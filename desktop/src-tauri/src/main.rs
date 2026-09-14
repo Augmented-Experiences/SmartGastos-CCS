@@ -76,6 +76,13 @@ impl Status {
 struct AppStatus(Mutex<Status>);
 struct BackendPort(u16);
 
+fn persist_status_snapshot(snapshot: &Status) {
+    let path = user_data_dir().join("desktop_status.json");
+    if let Ok(json) = serde_json::to_string(snapshot) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 fn update_status(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     let snapshot = {
         let state = app.state::<AppStatus>();
@@ -83,6 +90,7 @@ fn update_status(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
         f(&mut s);
         s.clone()
     };
+    persist_status_snapshot(&snapshot);
     let _ = app.emit("status", snapshot);
 }
 
@@ -216,6 +224,53 @@ fn backend_app_url(port: u16) -> String {
     format!("http://127.0.0.1:{}/", port)
 }
 
+fn splash_url(port: u16) -> String {
+    format!("http://127.0.0.1:{}/__splash/", port)
+}
+
+fn wait_for_health(port: u16, attempts: u32) -> bool {
+    let health_url = format!("http://127.0.0.1:{}/api/health", port);
+    for _ in 0..attempts {
+        match ureq::get(&health_url).call() {
+            Ok(r) if r.status() == 200 => {
+                ollama_log("GET /api/health 200 — sidecar arriba");
+                return true;
+            }
+            Ok(r) => ollama_log(&format!("GET /api/health status {}", r.status())),
+            Err(e) => ollama_log(&format!("GET /api/health error: {}", e)),
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
+fn navigate_webview_external(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> {
+    let parsed = Url::parse(url_str).map_err(|e| format!("URL invalida: {}", e))?;
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "ventana main no encontrada".to_string())?;
+    window
+        .navigate(WebviewUrl::External(parsed))
+        .map_err(|e| format!("navigate fallo: {}", e))?;
+    ollama_log(&format!("WebView navigate OK -> {}", url_str));
+    Ok(())
+}
+
+fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) {
+    let url = splash_url(port);
+    let app = app.clone();
+    ollama_log(&format!("abriendo splash same-origin: {}", url));
+    match app.run_on_main_thread(move || {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.show();
+        }
+        navigate_webview_external(&app, &url)
+    }) {
+        Ok(()) => ollama_log("open_splash_on_backend: run_on_main_thread OK"),
+        Err(e) => ollama_log(&format!("open_splash_on_backend: run_on_main_thread {}", e)),
+    }
+}
+
 struct ProbeResult {
     ok: bool,
     detail: String,
@@ -307,7 +362,6 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
             s.message = "Servicios listos.".into();
         }
     });
-    maybe_enter_app(app, port);
 }
 
 fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
@@ -328,52 +382,8 @@ fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), Str
     }
     let probe = probe_backend(port);
     *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
-    if !probe.ok {
-        return Err(probe.detail);
-    }
-    let url_str = backend_app_url(port);
-    let parsed = Url::parse(&url_str).map_err(|e| format!("URL invalida: {}", e))?;
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "ventana main no encontrada".to_string())?;
-    window
-        .navigate(WebviewUrl::External(parsed))
-        .map_err(|e| format!("navigate fallo: {}", e))?;
-    *app.state::<Navigated>().0.lock().unwrap() = true;
-    ollama_log(&format!("WebView navigate OK -> {}", url_str));
-    Ok(())
-}
-
-fn maybe_enter_app(app: &tauri::AppHandle, port: u16) {
-    let ollama_done = app.state::<AppStatus>().0.lock().unwrap().ollama_done;
-    if !ollama_done {
-        ollama_log("maybe_enter_app: esperando ollama_done");
-        return;
-    }
-    let app = app.clone();
-    ollama_log("maybe_enter_app: encolando navigate en hilo principal");
-    match app.run_on_main_thread(move || {
-        if let Err(e) = navigate_main_to_backend(&app, port) {
-            ollama_log(&format!("navigate error: {}", e));
-            update_status(&app, |s| {
-                s.backend_error = Some(format!(
-                    "{}. Pulse «Entrar ahora» para reintentar.",
-                    e
-                ));
-                s.phase = "warning".into();
-            });
-        }
-    }) {
-        Ok(()) => ollama_log("run_on_main_thread: OK"),
-        Err(e) => ollama_log(&format!("run_on_main_thread: {}", e)),
-    }
-}
-
-fn force_post_ollama_navigate(app: &tauri::AppHandle, port: u16) {
-    let probe = probe_backend(port);
-    *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
     ollama_log(&format!(
-        "probe final: ok={} {}",
+        "navigate_main_to_backend probe (no bloquea): ok={} {}",
         probe.ok,
         probe.detail
     ));
@@ -383,12 +393,15 @@ fn force_post_ollama_navigate(app: &tauri::AppHandle, port: u16) {
         update_status(app, |s| {
             s.phase = "warning".into();
             s.backend_error = Some(format!(
-                "El servidor local no respondio con la UI HTML. {}. Pulse «Entrar ahora» para reintentar.",
+                "Diagnostico UI: {}. Puede pulsar Entrar o esperar a que cargue.",
                 probe.detail
             ));
         });
     }
-    maybe_enter_app(app, port);
+    let url_str = backend_app_url(port);
+    navigate_webview_external(app, &url_str)?;
+    *app.state::<Navigated>().0.lock().unwrap() = true;
+    Ok(())
 }
 
 fn model_for_ram() -> String {
@@ -461,40 +474,26 @@ fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
 
 fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
     ollama_log("== finish_ollama_bootstrap (post extra_models)");
-    if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
-        ollama_log("esperando sidecar (probe /api/health + / + /api/desktop-ui)...");
-        let _ = try_mark_backend_ready(app, backend_port);
-        if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
-            wait_for_backend_ready(app, backend_port, 120);
-            let _ = try_mark_backend_ready(app, backend_port);
-        }
-    }
+    let _ = try_mark_backend_ready(app, backend_port);
 
     update_status(app, |s| {
         s.ollama_done = true;
         s.percent = 100;
+        s.message = "Modelos listos. Abriendo la aplicacion...".into();
         if s.can_continue {
             s.phase = "ready".into();
             if s.backend_url.is_none() {
                 s.backend_url = Some(backend_app_url(backend_port));
             }
+        } else {
+            let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
+            s.backend_error = Some(format!(
+                "UI aun no lista: {}. Use Entrar en el splash.",
+                detail
+            ));
         }
     });
-
-    force_post_ollama_navigate(app, backend_port);
-
-    let app2 = app.clone();
-    std::thread::spawn(move || {
-        for delay in [1u64, 3, 5] {
-            std::thread::sleep(Duration::from_secs(delay));
-            if *app2.state::<Navigated>().0.lock().unwrap() {
-                ollama_log("reintento post-ollama: ya navegado");
-                return;
-            }
-            ollama_log(&format!("reintento post-ollama navegacion (+{}s)", delay));
-            force_post_ollama_navigate(&app2, backend_port);
-        }
-    });
+    ollama_log("ollama_done=true; splash debe hacer location.replace('/') via /api/desktop-status");
 }
 
 fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
@@ -541,13 +540,6 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
     });
 }
 
-fn reset_splash_webview(app: &tauri::AppHandle) {
-    *app.state::<Navigated>().0.lock().unwrap() = false;
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.navigate(WebviewUrl::App("index.html".into()));
-    }
-}
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -562,7 +554,12 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
-            reset_splash_webview(&handle);
+            *handle.state::<Navigated>().0.lock().unwrap() = false;
+            persist_status_snapshot(&Status::initial());
+
+            if let Some(w) = handle.get_webview_window("main") {
+                let _ = w.hide();
+            }
 
             kill_backend_child(app.state::<BackendState>());
             let port = pick_port();
@@ -612,6 +609,16 @@ fn main() {
                     });
                 }
             }
+
+            let splash_handle = handle.clone();
+            std::thread::spawn(move || {
+                if wait_for_health(port, 120) {
+                    open_splash_on_backend(&splash_handle, port);
+                } else {
+                    ollama_log("timeout /api/health; intentando splash de todos modos");
+                    open_splash_on_backend(&splash_handle, port);
+                }
+            });
 
             bootstrap_ollama(handle.clone(), port);
 

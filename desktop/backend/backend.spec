@@ -25,6 +25,12 @@ if not APP_DIR.is_dir() or not (APP_DIR / "index.html").is_file():
     raise SystemExit(1)
 
 datas = [(str(APP_DIR), "app")]
+SPLASH_UI = DESKTOP / "ui"
+if SPLASH_UI.is_dir() and (SPLASH_UI / "index.html").is_file():
+    datas.append((str(SPLASH_UI), "splash_ui"))
+else:
+    print(f"WARNING: splash ui missing at {SPLASH_UI}", file=sys.stderr)
+
 _defaults = ROOT / "defaults"
 if _defaults.is_dir():
     datas.append((str(_defaults), "defaults"))

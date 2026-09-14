@@ -1788,6 +1788,56 @@ print(
 )
 
 
+def _resolve_splash_dir() -> Path:
+    """Archivos splash (desktop/ui) empaquetados como splash_ui en PyInstaller."""
+    candidates: list[Path] = []
+    if _IS_FROZEN:
+        meipass = Path(getattr(sys, "_MEIPASS", str(BASE_DIR)))
+        candidates.append(meipass / "splash_ui")
+    candidates.extend(
+        [
+            BASE_DIR / "desktop" / "ui",
+            Path(__file__).resolve().parent.parent / "desktop" / "ui",
+        ]
+    )
+    for c in candidates:
+        if (c / "index.html").is_file():
+            return c.resolve()
+    return (BASE_DIR / "desktop" / "ui").resolve()
+
+
+_SPLASH_DIR = _resolve_splash_dir()
+_SPLASH_INDEX = _SPLASH_DIR / "index.html"
+_DESKTOP_STATUS_FILE = DATA_DIR / "desktop_status.json"
+print(
+    f"INFO: SPLASH_DIR = {_SPLASH_DIR} (index_exists={_SPLASH_INDEX.is_file()})"
+)
+
+
+@app.get("/api/desktop-status")
+async def desktop_status():
+    """Estado del arranque (Ollama) escrito por Tauri en desktop_status.json."""
+    default = {
+        "phase": "starting",
+        "message": "Iniciando servicios...",
+        "percent": -1,
+        "backendUrl": None,
+        "canContinue": False,
+        "ollamaDone": False,
+        "backendError": None,
+    }
+    if not _DESKTOP_STATUS_FILE.is_file():
+        return default
+    try:
+        raw = _DESKTOP_STATUS_FILE.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return {**default, **data}
+    except Exception as exc:
+        _app_logger.warning("desktop_status.json: %s", exc)
+    return default
+
+
 @app.get("/api/desktop-ui")
 async def desktop_ui_status():
     """Diagnóstico para el instalador Tauri (UI empaquetada en el sidecar)."""
@@ -1799,6 +1849,15 @@ async def desktop_ui_status():
         "port": PORT,
     }
 
+
+if _SPLASH_INDEX.is_file():
+    app.mount(
+        "/__splash",
+        StaticFiles(directory=str(_SPLASH_DIR), html=True),
+        name="splash",
+    )
+else:
+    print(f"WARNING: splash index.html no encontrado en {_SPLASH_DIR}")
 
 if _INDEX_HTML.is_file():
     app.mount("/ui", StaticFiles(directory=str(_APP_DIR), html=True), name="ui")
