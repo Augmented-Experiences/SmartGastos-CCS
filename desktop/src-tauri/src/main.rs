@@ -11,7 +11,7 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{Emitter, Manager, RunEvent, Url};
+use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -194,8 +194,17 @@ fn backend_log(line: &str) {
 
 fn kill_backend_child(state: &BackendState) {
     if let Some(child) = state.0.lock().unwrap().take() {
-        let _ = child.kill();
+        ollama_log("kill_backend_child: terminando sidecar backend");
+        match child.kill() {
+            Ok(()) => ollama_log("kill_backend_child: OK"),
+            Err(e) => ollama_log(&format!("kill_backend_child: {}", e)),
+        }
     }
+}
+
+fn shutdown_app(app: &tauri::AppHandle, reason: &str) {
+    ollama_log(&format!("shutdown_app: {}", reason));
+    kill_backend_child(&*app.state::<BackendState>());
 }
 
 fn pick_port() -> u16 {
@@ -263,6 +272,9 @@ fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) {
     match app.run_on_main_thread(move || {
         if let Some(w) = handle.get_webview_window("main") {
             let _ = w.show();
+            let _ = w.set_focus();
+        } else {
+            ollama_log("open_splash_on_backend: ventana main no encontrada antes de navigate");
         }
         if let Err(e) = navigate_webview_external(&handle, &url) {
             ollama_log(&format!("open_splash_on_backend navigate: {}", e));
@@ -560,7 +572,19 @@ fn main() {
             persist_status_snapshot(&Status::initial());
 
             if let Some(w) = handle.get_webview_window("main") {
-                let _ = w.hide();
+                let app_for_window = handle.clone();
+                w.on_window_event(move |event| {
+                    match event {
+                        WindowEvent::CloseRequested => {
+                            shutdown_app(&app_for_window, "ventana main CloseRequested");
+                        }
+                        WindowEvent::Destroyed => {
+                            shutdown_app(&app_for_window, "ventana main Destroyed");
+                            app_for_window.exit(0);
+                        }
+                        _ => {}
+                    }
+                });
             }
 
             kill_backend_child(&*app.state::<BackendState>());
@@ -583,6 +607,7 @@ fn main() {
                             .lock()
                             .unwrap()
                             .replace(child);
+                        let sidecar_handle = handle.clone();
                         tauri::async_runtime::spawn(async move {
                             while let Some(event) = rx.recv().await {
                                 if let CommandEvent::Stderr(bytes) | CommandEvent::Stdout(bytes) =
@@ -591,6 +616,8 @@ fn main() {
                                     backend_log(&String::from_utf8_lossy(&bytes));
                                 }
                             }
+                            ollama_log("sidecar backend: canal de eventos cerrado (proceso terminó?)");
+                            shutdown_app(&sidecar_handle, "sidecar stdout/stderr EOF");
                         });
                     }
                     Err(e) => {
@@ -636,8 +663,23 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error al construir la app de escritorio")
         .run(|app_handle, event| {
-            if matches!(event, RunEvent::Exit) {
-                kill_backend_child(&*app_handle.state::<BackendState>());
+            match event {
+                RunEvent::ExitRequested { .. } => {
+                    shutdown_app(app_handle, "RunEvent::ExitRequested");
+                }
+                RunEvent::Exit => {
+                    shutdown_app(app_handle, "RunEvent::Exit");
+                }
+                RunEvent::WindowEvent { label, event, .. } if label == "main" => {
+                    if matches!(event, WindowEvent::CloseRequested) {
+                        shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
+                    }
+                    if matches!(event, WindowEvent::Destroyed) {
+                        shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
+                        app_handle.exit(0);
+                    }
+                }
+                _ => {}
             }
         });
 }
