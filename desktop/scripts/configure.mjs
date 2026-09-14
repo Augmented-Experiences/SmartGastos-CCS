@@ -235,8 +235,6 @@ const capabilities = {
   windows: ["main"],
   permissions: [
     "core:default",
-    "core:event:default",
-    "core:window:default",
     "core:webview:default",
     "shell:allow-kill",
     "shell:allow-stdin-write",

@@ -1,13 +1,9 @@
 {
   "identifier": "default",
   "description": "Permisos base para la ventana principal de SmartGastos.",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:event:default",
-    "core:window:default",
     "core:webview:default",
     "shell:allow-kill",
     "shell:allow-stdin-write",
