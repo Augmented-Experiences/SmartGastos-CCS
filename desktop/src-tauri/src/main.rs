@@ -258,13 +258,13 @@ fn navigate_webview_external(app: &tauri::AppHandle, url_str: &str) -> Result<()
 
 fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) {
     let url = splash_url(port);
-    let app = app.clone();
+    let handle = app.clone();
     ollama_log(&format!("abriendo splash same-origin: {}", url));
     match app.run_on_main_thread(move || {
-        if let Some(w) = app.get_webview_window("main") {
+        if let Some(w) = handle.get_webview_window("main") {
             let _ = w.show();
         }
-        if let Err(e) = navigate_webview_external(&app, &url) {
+        if let Err(e) = navigate_webview_external(&handle, &url) {
             ollama_log(&format!("open_splash_on_backend navigate: {}", e));
         }
     }) {
