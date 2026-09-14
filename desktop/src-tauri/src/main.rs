@@ -576,7 +576,7 @@ fn main() {
                 let app_for_window = handle.clone();
                 w.on_window_event(move |event| {
                     match event {
-                        WindowEvent::CloseRequested => {
+                        WindowEvent::CloseRequested { api: _ } => {
                             shutdown_app(&app_for_window, "ventana main CloseRequested");
                         }
                         WindowEvent::Destroyed => {
@@ -687,7 +687,7 @@ fn main() {
                     shutdown_app(app_handle, "RunEvent::Exit");
                 }
                 RunEvent::WindowEvent { label, event, .. } if label == "main" => {
-                    if matches!(event, WindowEvent::CloseRequested) {
+                    if matches!(event, WindowEvent::CloseRequested { api: _ }) {
                         shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
                     }
                     if matches!(event, WindowEvent::Destroyed) {
