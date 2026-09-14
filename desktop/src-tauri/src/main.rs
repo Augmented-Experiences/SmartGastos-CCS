@@ -1,9 +1,4 @@
 // App de escritorio nativa SmartSuite (Tauri v2)
-//
-// Arranca el backend FastAPI empaquetado (sidecar `backend`), prepara
-// Ollama (servicio + descarga del modelo según la RAM) y muestra el progreso en
-// la pantalla de carga. Cuando todo está listo, la ventana carga la UI real.
-// Al cerrar la app, detiene el backend.
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 use std::io::{BufRead, Write};
@@ -16,15 +11,13 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{Emitter, Manager, RunEvent};
+use tauri::{Emitter, Manager, RunEvent, WebviewUrl};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-/// En Windows evita que se abra una ventana de consola al lanzar procesos.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-// --- Config por-herramienta (generada por scripts/configure.mjs) ---
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Tier {
@@ -38,8 +31,6 @@ struct AppConfig {
     product_name: String,
     data_dir_name: String,
     ollama_tiers: Vec<Tier>,
-    /// Modelos adicionales a descargar con progreso (p. ej. modelo de visión
-    /// para OCR neuronal). Se descargan igual que el modelo del LLM.
     #[serde(default)]
     extra_models: Vec<String>,
 }
@@ -48,52 +39,40 @@ static APP_CONFIG_JSON: &str = include_str!("../appconfig.json");
 
 fn app_config() -> &'static AppConfig {
     static CFG: OnceLock<AppConfig> = OnceLock::new();
-    CFG.get_or_init(|| serde_json::from_str(APP_CONFIG_JSON).expect("appconfig.json inválido"))
+    CFG.get_or_init(|| serde_json::from_str(APP_CONFIG_JSON).expect("appconfig.json invalido"))
 }
 
-/// Proceso hijo del backend (para terminarlo al salir).
 struct BackendState(Mutex<Option<CommandChild>>);
 
-/// Estado compartido que se muestra en la pantalla de carga.
 #[derive(Clone, serde::Serialize)]
 struct Status {
-    /// "starting" | "ollama" | "downloading" | "ready" | "warning"
     phase: String,
     message: String,
-    /// 0–100, o -1 si es indeterminado.
     percent: i32,
-    /// URL de la UI real (cuando el backend responde).
     backend_url: Option<String>,
-    /// El backend ya responde: se puede entrar.
     can_continue: bool,
-    /// El paso de Ollama terminó (éxito, omitido o fallo no fatal).
     ollama_done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend_error: Option<String>,
 }
 
 impl Status {
     fn initial() -> Self {
         Status {
             phase: "starting".into(),
-            message: "Iniciando servicios…".into(),
+            message: "Iniciando servicios...".into(),
             percent: -1,
             backend_url: None,
             can_continue: false,
             ollama_done: false,
+            backend_error: None,
         }
     }
 }
 
 struct AppStatus(Mutex<Status>);
-
-/// Puerto HTTP del sidecar FastAPI (fijado en `setup`).
 struct BackendPort(u16);
 
-/// Ruta que devuelve 200 cuando FastAPI está sirviendo (SmartGastos/SmartCaja).
-const BACKEND_HEALTH_PATH: &str = "/api/health";
-/// Entrada de la UI web empaquetada (StaticFiles en `server/app.py`).
-const BACKEND_UI_PATH: &str = "/ui/";
-
-/// Actualiza el estado compartido y lo emite a la pantalla de carga.
 fn update_status(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     let snapshot = {
         let state = app.state::<AppStatus>();
@@ -104,14 +83,22 @@ fn update_status(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     let _ = app.emit("status", snapshot);
 }
 
-/// Comando invocable desde la pantalla de carga para obtener el estado actual
-/// (evita perder actualizaciones si la página carga tarde).
 #[tauri::command]
 fn current_status(state: tauri::State<AppStatus>) -> Status {
     state.0.lock().unwrap().clone()
 }
 
-/// Comando `ollama` sin ventana de consola en Windows.
+#[tauri::command]
+fn retry_backend(app: tauri::AppHandle, port: tauri::State<BackendPort>) -> Result<String, String> {
+    let p = port.0;
+    if try_mark_backend_ready(&app, p) {
+        let url = backend_app_url(p);
+        Ok(url)
+    } else {
+        Err("El servidor aun no responde. Espere unos segundos o cierre la app por completo y vuelva a abrirla.".into())
+    }
+}
+
 fn ollama_command() -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new("ollama");
@@ -135,7 +122,6 @@ fn home_dir() -> PathBuf {
     }
 }
 
-/// Carpeta de datos por-usuario (coincide con la del backend).
 fn user_data_dir() -> PathBuf {
     let app = app_config().data_dir_name.as_str();
     #[cfg(target_os = "windows")]
@@ -167,7 +153,6 @@ fn log_dir() -> PathBuf {
     dir
 }
 
-/// Añade una línea de estado al log de Ollama.
 fn ollama_log(line: &str) {
     let path = log_dir().join("ollama.log");
     if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -179,7 +164,23 @@ fn ollama_log(line: &str) {
     }
 }
 
-/// Elige un puerto libre para el backend (prefiere 7860, luego efímero).
+fn backend_log(line: &str) {
+    let path = log_dir().join("backend.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(f, "{}", line);
+    }
+}
+
+fn kill_backend_child(state: &BackendState) {
+    if let Some(child) = state.0.lock().unwrap().take() {
+        let _ = child.kill();
+    }
+}
+
 fn pick_port() -> u16 {
     for p in [7860u16, 7861, 7862, 7863] {
         if TcpListener::bind(("127.0.0.1", p)).is_ok() {
@@ -192,7 +193,6 @@ fn pick_port() -> u16 {
         .unwrap_or(7860)
 }
 
-/// Espera hasta que el puerto acepte conexiones (Ollama u otros servicios TCP).
 fn wait_for_port(port: u16, attempts: u32) -> bool {
     for _ in 0..attempts {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -203,23 +203,30 @@ fn wait_for_port(port: u16, attempts: u32) -> bool {
     false
 }
 
-fn backend_health_url(port: u16) -> String {
-    format!("http://127.0.0.1:{}{}", port, BACKEND_HEALTH_PATH)
+/// URL de la app web (SmartGastos sirve index y assets en `/`, no en `/ui/`).
+fn backend_app_url(port: u16) -> String {
+    format!("http://127.0.0.1:{}/", port)
 }
 
-fn backend_ui_url(port: u16) -> String {
-    format!("http://127.0.0.1:{}{}", port, BACKEND_UI_PATH)
+fn http_ok(url: &str) -> bool {
+    match ureq::get(url).call() {
+        Ok(resp) => {
+            let s = resp.status();
+            s == 200 || s == 304 || s == 307 || s == 308
+        }
+        Err(_) => false,
+    }
 }
 
-/// Espera hasta que `GET /api/health` responda 200 (no basta con TCP al puerto).
+fn probe_backend_ready(port: u16) -> bool {
+    let health = format!("http://127.0.0.1:{}/api/health", port);
+    let root = backend_app_url(port);
+    http_ok(&health) || http_ok(&root)
+}
+
 fn wait_for_backend_ready(port: u16, attempts: u32) -> bool {
-    let url = backend_health_url(port);
     for _ in 0..attempts {
-        if ureq::get(&url)
-            .call()
-            .map(|r| r.status() == 200)
-            .unwrap_or(false)
-        {
+        if probe_backend_ready(port) {
             return true;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -228,21 +235,27 @@ fn wait_for_backend_ready(port: u16, attempts: u32) -> bool {
 }
 
 fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
-    let url = backend_ui_url(port);
+    let url = backend_app_url(port);
     update_status(app, |s| {
         s.backend_url = Some(url);
         s.can_continue = true;
-        if s.phase == "starting" || s.phase == "downloading" || s.phase == "ollama" {
-            s.phase = "ready".into();
-        }
-        if s.message.is_empty() || s.message.starts_with("Descargando") || s.message.starts_with("Componente") {
+        s.backend_error = None;
+        s.phase = "ready".into();
+        if s.message.starts_with("Descargando") || s.message.starts_with("Componente") {
             s.message = "Servicios listos.".into();
         }
     });
 }
 
-/// Modelo de Ollama recomendado según la RAM total del equipo y la config
-/// por-herramienta (tiers en appconfig.json).
+fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
+    if probe_backend_ready(port) {
+        apply_backend_ready(app, port);
+        true
+    } else {
+        false
+    }
+}
+
 fn model_for_ram() -> String {
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
@@ -259,8 +272,6 @@ fn model_for_ram() -> String {
         .unwrap_or_else(|| "llama3.2:3b".to_string())
 }
 
-/// Descarga el modelo vía la API de Ollama (`/api/pull`) mostrando el progreso.
-/// Devuelve true si el modelo quedó disponible.
 fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
     let body = format!("{{\"name\":\"{}\"}}", model);
     let resp = ureq::post("http://127.0.0.1:11434/api/pull")
@@ -296,9 +307,9 @@ fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
             _ => -1,
         };
         let msg = if pct >= 0 {
-            format!("Descargando el modelo {} — {}%", model, pct)
+            format!("Descargando el modelo {} - {}%", model, pct)
         } else {
-            format!("Preparando el modelo {} ({})…", model, status)
+            format!("Preparando el modelo {} ({})...", model, status)
         };
         ollama_log(&msg);
         update_status(app, |s| {
@@ -313,16 +324,42 @@ fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
     ok
 }
 
-/// Deja Ollama listo (best-effort) mostrando el progreso en la pantalla de carga.
+fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
+    if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
+        try_mark_backend_ready(app, backend_port);
+        if !app.state::<AppStatus>().0.lock().unwrap().can_continue {
+            wait_for_backend_ready(backend_port, 120);
+            try_mark_backend_ready(app, backend_port);
+        }
+    }
+
+    update_status(app, |s| {
+        s.ollama_done = true;
+        if s.can_continue {
+            s.phase = "ready".into();
+            if s.backend_url.is_none() {
+                s.backend_url = Some(backend_app_url(backend_port));
+            }
+        } else {
+            s.phase = "warning".into();
+            s.backend_error = Some(
+                "El servidor no respondio (revise SmartGastos/logs en AppData). \
+Pulse Entrar para reintentar o cierre la app por completo y vuelva a abrirla."
+                    .into(),
+            );
+        }
+    });
+}
+
 fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
     std::thread::spawn(move || {
         update_status(&app, |s| {
             s.phase = "ollama".into();
-            s.message = "Verificando el motor de IA (Ollama)…".into();
+            s.message = "Verificando el motor de IA (Ollama)...".into();
             s.percent = -1;
         });
         ollama_log(&format!(
-            "== {}: preparando el motor de IA (Ollama) ==",
+            "== {}: preparando Ollama ==",
             app_config().product_name
         ));
 
@@ -334,97 +371,64 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
             .map(|s| s.success())
             .unwrap_or(false);
         if !installed {
-            ollama_log("Ollama no está instalado. La app abrirá y la UI mostrará 'desconectado'.");
+            ollama_log("Ollama no instalado.");
             update_status(&app, |s| {
                 s.phase = "warning".into();
                 s.message =
-                    "Ollama no está instalado. La app abrirá; instálalo desde ollama.com/download para usar la IA."
-                        .into();
+                    "Ollama no esta instalado. La app abrira sin IA hasta que lo instale.".into();
                 s.percent = -1;
-                s.ollama_done = true;
             });
+            finish_ollama_bootstrap(&app, backend_port);
             return;
         }
 
         if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
             update_status(&app, |s| {
-                s.message = "Iniciando el servicio de IA…".into();
+                s.message = "Iniciando el servicio de IA...".into();
                 s.percent = -1;
             });
-            ollama_log("Iniciando el servicio 'ollama serve'…");
             let mut cmd = ollama_command();
             cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
             let _ = cmd.spawn();
             wait_for_port(11434, 30);
         }
-        ollama_log("Servicio Ollama disponible.");
 
         let model = model_for_ram();
         update_status(&app, |s| {
             s.phase = "downloading".into();
-            s.message = format!("Descargando el modelo {} (solo la primera vez)…", model);
+            s.message = format!("Descargando el modelo {} (solo la primera vez)...", model);
             s.percent = -1;
         });
         let ok = pull_model_with_progress(&app, &model);
-
         if ok {
-            ollama_log(&format!("Modelo '{}' listo.", model));
             update_status(&app, |s| {
                 s.message = format!("Modelo {} listo.", model);
                 s.percent = 100;
             });
-        } else {
-            ollama_log(&format!("No se pudo descargar '{}' automáticamente.", model));
-            update_status(&app, |s| {
-                s.phase = "warning".into();
-                s.message = format!(
-                    "No se pudo descargar {} automáticamente; podrás reintentar desde la app.",
-                    model
-                );
-                s.percent = -1;
-            });
         }
 
-        // Modelos adicionales (p. ej. visión para OCR neuronal), con el mismo progreso.
         for extra in &app_config().extra_models {
             update_status(&app, |s| {
                 s.phase = "downloading".into();
-                s.message = format!("Descargando componente de IA {} (solo la primera vez)…", extra);
+                s.message = format!("Descargando componente de IA {}...", extra);
                 s.percent = -1;
             });
-            ollama_log(&format!("Descargando modelo adicional '{}'…", extra));
             if pull_model_with_progress(&app, extra) {
-                ollama_log(&format!("Modelo adicional '{}' listo.", extra));
                 update_status(&app, |s| {
                     s.message = format!("Componente {} listo.", extra);
                     s.percent = 100;
                 });
-            } else {
-                ollama_log(&format!("No se pudo descargar el modelo adicional '{}'.", extra));
-                update_status(&app, |s| {
-                    s.phase = "warning".into();
-                    s.message = format!("No se pudo descargar {}; podrás reintentarlo luego.", extra);
-                    s.percent = -1;
-                });
             }
         }
 
-        // Tras descargas largas (p. ej. moondream), el hilo de readiness puede haber
-        // expirado antes de que el sidecar respondiera; volver a comprobar HTTP.
-        let ready = app.state::<AppStatus>().0.lock().unwrap().can_continue;
-        if !ready {
-            if wait_for_backend_ready(backend_port, 600) {
-                apply_backend_ready(&app, backend_port);
-            }
-        }
-
-        update_status(&app, |s| {
-            s.ollama_done = true;
-            if s.can_continue && s.backend_url.is_some() {
-                s.phase = "ready".into();
-            }
-        });
+        finish_ollama_bootstrap(&app, backend_port);
     });
+}
+
+fn reset_splash_webview(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.navigate(WebviewUrl::App("index.html".into()));
+    }
 }
 
 fn main() {
@@ -432,45 +436,63 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .manage(BackendState(Mutex::new(None)))
         .manage(AppStatus(Mutex::new(Status::initial())))
-        .invoke_handler(tauri::generate_handler![current_status])
+        .invoke_handler(tauri::generate_handler![current_status, retry_backend])
         .setup(|app| {
             let handle = app.handle().clone();
+            reset_splash_webview(&handle);
+
+            kill_backend_child(app.state::<BackendState>());
             let port = pick_port();
             app.manage(BackendPort(port));
+            backend_log(&format!("Puerto backend elegido: {}", port));
 
-            // 1) Lanzar el backend empaquetado (sidecar), pasándole el puerto y la
-            //    carpeta de datos por entorno (compatible con las apps del SmartSuite).
             let data_dir = user_data_dir().to_string_lossy().to_string();
-            let (mut rx, child) = app
-                .shell()
-                .sidecar("backend")
-                .expect("no se encontró el sidecar 'backend'")
-                .env("PORT", port.to_string())
-                .env("DATA_DIR", data_dir)
-                .spawn()
-                .expect("no se pudo iniciar el backend");
-            app.state::<BackendState>()
-                .0
-                .lock()
-                .unwrap()
-                .replace(child);
-
-            // Drenar la salida del backend (evita bloqueos del buffer).
-            tauri::async_runtime::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    if let CommandEvent::Stderr(bytes) | CommandEvent::Stdout(bytes) = event {
-                        let _ = String::from_utf8_lossy(&bytes);
+            let sidecar = app.shell().sidecar("backend");
+            match sidecar {
+                Ok(cmd) => match cmd
+                    .env("PORT", port.to_string())
+                    .env("DATA_DIR", data_dir)
+                    .spawn()
+                {
+                    Ok((mut rx, child)) => {
+                        app.state::<BackendState>()
+                            .0
+                            .lock()
+                            .unwrap()
+                            .replace(child);
+                        tauri::async_runtime::spawn(async move {
+                            while let Some(event) = rx.recv().await {
+                                if let CommandEvent::Stderr(bytes) | CommandEvent::Stdout(bytes) =
+                                    event
+                                {
+                                    backend_log(&String::from_utf8_lossy(&bytes));
+                                }
+                            }
+                        });
                     }
+                    Err(e) => {
+                        backend_log(&format!("spawn error: {}", e));
+                        update_status(&handle, |s| {
+                            s.phase = "warning".into();
+                            s.message = format!("No se pudo iniciar el servidor: {}", e);
+                            s.backend_error = Some(s.message.clone());
+                        });
+                    }
+                },
+                Err(e) => {
+                    backend_log(&format!("sidecar missing: {}", e));
+                    update_status(&handle, |s| {
+                        s.phase = "warning".into();
+                        s.message = format!("Backend no encontrado en el instalador: {}", e);
+                        s.backend_error = Some(s.message.clone());
+                    });
                 }
-            });
+            }
 
-            // 2) Preparar Ollama con progreso en pantalla.
             bootstrap_ollama(handle.clone(), port);
 
-            // 3) Cuando FastAPI responda en /api/health, habilitar el ingreso a la UI.
             let ready_handle = handle.clone();
             std::thread::spawn(move || {
-                // Hasta ~30 min (arranque lento + descargas Ollama en paralelo).
                 if wait_for_backend_ready(port, 3600) {
                     apply_backend_ready(&ready_handle, port);
                 }
@@ -481,10 +503,8 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error al construir la app de escritorio")
         .run(|app_handle, event| {
-            if let RunEvent::Exit = event {
-                if let Some(child) = app_handle.state::<BackendState>().0.lock().unwrap().take() {
-                    let _ = child.kill();
-                }
+            if matches!(event, RunEvent::Exit) {
+                kill_backend_child(app_handle.state::<BackendState>());
             }
         });
 }

@@ -42,6 +42,7 @@
     .enter.show { opacity: 1; pointer-events: auto; }
     .enter:hover { filter: brightness(1.05); }
     .foot { position: absolute; bottom: 18px; color: #9fb2d6; font-size: 11px; }
+    .error { color: #ffb4b4; font-size: 13px; max-width: 480px; line-height: 1.45; display: none; }
   </style>
 </head>
 <body>
@@ -51,6 +52,7 @@
   <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
   <div class="pct" id="pct"></div>
   <div class="status" id="status">Iniciando servicios...</div>
+  <div class="error" id="error"></div>
   <button class="enter" id="enter">Entrar ahora</button>
   <div class="foot">Camara Colombiana de Comercio Electronico (CCCE)</div>
 
@@ -60,6 +62,7 @@
     const fillEl = document.getElementById('fill');
     const trackEl = document.getElementById('track');
     const enterBtn = document.getElementById('enter');
+    const errorEl = document.getElementById('error');
 
     let backendUrl = null;
     let navigated = false;
@@ -74,17 +77,21 @@
     }
 
     function maybeNavigate() {
-      if (navigated || !backendUrl) return;
-      if (canContinue && ollamaDone) {
-        if (!navigateTimer) {
-          navigateTimer = setTimeout(goToApp, 600);
-        }
+      if (navigated || !backendUrl || !canContinue || !ollamaDone) return;
+      if (!navigateTimer) {
+        navigateTimer = setTimeout(goToApp, 400);
       }
     }
 
     function render(s) {
       if (!s) return;
       if (s.message) statusEl.textContent = s.message;
+      if (s.backend_error) {
+        errorEl.textContent = s.backend_error;
+        errorEl.style.display = 'block';
+      } else {
+        errorEl.style.display = 'none';
+      }
       if (typeof s.percent === 'number' && s.percent >= 0) {
         trackEl.classList.remove('indeterminate');
         fillEl.style.width = s.percent + '%';
@@ -94,15 +101,33 @@
         pctEl.textContent = '';
       }
       if (s.backend_url) backendUrl = s.backend_url;
-      if (s.can_continue) {
-        canContinue = true;
+      if (s.can_continue) canContinue = true;
+      if (s.ollama_done) {
+        ollamaDone = true;
         enterBtn.classList.add('show');
       }
-      if (s.ollama_done) ollamaDone = true;
       maybeNavigate();
     }
 
-    enterBtn.addEventListener('click', goToApp);
+    enterBtn.addEventListener('click', async () => {
+      if (navigated) return;
+      if (!backendUrl) {
+        const t = window.__TAURI__;
+        if (t && t.core) {
+          try {
+            backendUrl = await t.core.invoke('retry_backend');
+            canContinue = true;
+            errorEl.style.display = 'none';
+            goToApp();
+          } catch (e) {
+            errorEl.textContent = String(e);
+            errorEl.style.display = 'block';
+          }
+        }
+        return;
+      }
+      goToApp();
+    });
 
     function pollStatus() {
       const t = window.__TAURI__;

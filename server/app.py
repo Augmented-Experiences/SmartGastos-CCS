@@ -1762,18 +1762,18 @@ async def reset_agents():
 # Servir archivos estáticos de la UI
 # ============================================================
 
-# Montar UI con ruta absoluta
+# UI estática: /api/* primero; luego /ui (Pinokio) y / (instalador Tauri / WebView).
 _APP_DIR = BASE_DIR / "app"
 if _APP_DIR.exists():
     app.mount("/ui", StaticFiles(directory=str(_APP_DIR), html=True), name="ui")
+    # Rutas relativas en index.html (vendor/, fonts/, ...) resuelven desde la raíz.
+    app.mount("/", StaticFiles(directory=str(_APP_DIR), html=True), name="ui_root")
 else:
     print(f"WARNING: Directorio UI no encontrado en {_APP_DIR}")
 
-
-# Redirigir raíz a la UI
-@app.get("/")
-async def root_redirect():
-    return RedirectResponse(url="/ui")
+    @app.get("/")
+    async def root_missing_ui():
+        raise HTTPException(status_code=503, detail="UI no empaquetada")
 
 
 if __name__ == "__main__":

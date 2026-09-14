@@ -4,7 +4,7 @@
   - Texto / marca: desktop/smartsuite.config.json (productName, splashSubtitle, accent)
   - Logo: splashLogo en smartsuite.config.json (ruta relativa a desktop/) o ../icon.png en la raiz del repo
   - Layout y estilos: bloque <style> y clases .brand / .splash-logo / .track abajo
-  - Placeholders: SmartGastos, Smart<span class="accent">Gastos</span>, Preparando tu asistente de gastos y contabilidad con IA local…, <img class="splash-logo" src="splash-logo.png" alt="SmartGastos" />
+  - Placeholders: SmartGastos, Smart<span class="accent">Gastos</span>, Preparando tu asistente de gastos y contabilidad con IA local..., <img class="splash-logo" src="splash-logo.png" alt="SmartGastos" />
   
 -->
 <!DOCTYPE html>
@@ -43,13 +43,14 @@
     .enter.show { opacity: 1; pointer-events: auto; }
     .enter:hover { filter: brightness(1.05); }
     .foot { position: absolute; bottom: 18px; color: #9fb2d6; font-size: 11px; }
+    .error { color: #ffb4b4; font-size: 13px; max-width: 480px; line-height: 1.45; display: none; }
   </style>
 </head>
 <body>
   <img class="splash-logo" src="splash-logo.png" alt="SmartGastos" />
   
   <div class="brand">Smart<span class="accent">Gastos</span></div>
-  <div class="sub">Preparando tu asistente de gastos y contabilidad con IA local…</div>
+  <div class="sub">Preparando tu asistente de gastos y contabilidad con IA local...</div>
   <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
   <div class="pct" id="pct"></div>
   <div class="status" id="status">Iniciando servicios...</div>
