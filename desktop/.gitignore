@@ -10,5 +10,9 @@ src-tauri/gen/
 src-tauri/binaries/*
 !src-tauri/binaries/README.md
 
+# Logs de build (tauri-build.mjs)
+tauri-build.log
+cargo-build.log
+
 # Node
 node_modules/
