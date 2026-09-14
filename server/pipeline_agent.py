@@ -81,20 +81,47 @@ def _ollama_list() -> List[str]:
     return []
 
 
-_TEXT_ONLY_MODEL_PREFIXES = ("qwen3", "qwen2.5", "llama3.2:3b", "llama3:8b", "phi", "gemma")
+_VISION_MODEL_MARKERS = (
+    "moondream",
+    "llava",
+    "minicpm-v",
+    "llama3.2-vision",
+    "granite3.2-vision",
+    "bakllava",
+    "llama3-vision",
+)
 
 
-def _coerce_multimodal_model(
-    model: Optional[str], vision_fallback: Optional[str], needs_image: bool
-) -> Optional[str]:
-    """Evita enviar imagenes a modelos solo-texto (p. ej. qwen3 en instalador desktop)."""
+def _model_supports_vision(model: Optional[str]) -> bool:
     if not model:
-        return vision_fallback
-    if needs_image and vision_fallback:
-        lower = model.lower()
-        if any(t in lower for t in _TEXT_ONLY_MODEL_PREFIXES):
-            return vision_fallback
-    return model
+        return False
+    m = model.lower()
+    return any(marker in m for marker in _VISION_MODEL_MARKERS)
+
+
+def _resolve_vision_model(
+    preferred: Optional[str],
+    detected: Optional[str],
+    available: Optional[List[str]],
+) -> Optional[str]:
+    """Elige un modelo Ollama que acepte imágenes (p. ej. moondream)."""
+    candidates: List[str] = []
+    for c in (preferred, detected):
+        if c:
+            candidates.append(c)
+    candidates.extend(VISION_MODELS)
+    if available:
+        found = _find_best_model(candidates, available)
+        if found and _model_supports_vision(found):
+            return found
+    for c in candidates:
+        if c and _model_supports_vision(c):
+            if not available:
+                return c
+            resolved = _find_best_model([c], available)
+            if resolved:
+                return resolved
+    return None
 
 
 def _find_best_model(preferred_list: List[str], available: List[str]) -> Optional[str]:
@@ -245,7 +272,13 @@ def _ollama_generate(model: str, prompt: str, image_b64: Optional[str] = None,
         if system:
             payload["system"] = system
         if image_b64:
-            payload["images"] = [image_b64]
+            if _model_supports_vision(model):
+                payload["images"] = [image_b64]
+            else:
+                logger.warning(
+                    "Omitiendo imagen: el modelo %s no es multimodal (use moondream)",
+                    model,
+                )
 
         r = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=timeout)
         if r.status_code == 200:
@@ -1307,91 +1340,101 @@ class DocumentPipelineAgent:
         # Produce: campos visuales + texto adicional
         if vision_model and img_b64:
             cfg_vision = self._get_agent_config("vision")
-            vision_model_to_use = cfg_vision["modelo"] or vision_model
-
-            # PROTECCIÓN WINDOWS: Validar que el modelo visual sea realmente multimodal.
-            # qwen3:0.6b es solo texto y falla silenciosamente al recibir imágenes.
-            # Si se detectó un modelo de solo texto, forzar al modelo de visión real.
-            TEXT_ONLY_MODELS = ["qwen3", "qwen2.5", "llama3.2:3b", "llama3:8b", "phi", "gemma"]
-            is_text_only = any(t in vision_model_to_use.lower() for t in TEXT_ONLY_MODELS)
-            if is_text_only:
-                logger.warning(
-                    f"Modelo '{vision_model_to_use}' NO soporta imágenes. "
-                    f"Forzando a modelo de visión real: {vision_model}"
-                )
-                vision_model_to_use = vision_model  # Usar el detectado por _get_models()
-
-            yield self._emit("vision", "running", {
-                "title": "Agente Visual — Análisis de imagen",
-                "message": f"Analizando imagen con {vision_model_to_use} + contexto OCR..."
-            })
-            try:
-                # Usar prompt/system_prompt configurado, sino el default
-                # Para qwen3: habilitar thinking con /think al inicio del prompt
-                vision_prompt = cfg_vision["prompt"] if cfg_vision["prompt"] else build_vision_prompt(ctx["ocr_text"])
-                vision_system = cfg_vision["system_prompt"] if cfg_vision["system_prompt"] else VISION_SYSTEM_PROMPT
-                # Activar thinking nativo para qwen3 (quitar prefijo /think manual)
-                is_qwen_vision = "qwen" in vision_model_to_use.lower()
-                if is_qwen_vision and vision_prompt.startswith("/think\n"):
-                    vision_prompt = vision_prompt[len("/think\n"):]
-
-                vision_resp, vision_prompt_sent, vision_raw, vision_thinking = _ollama_generate(
-                    model=vision_model_to_use,
-                    prompt=vision_prompt,
-                    image_b64=img_b64,                    # ← IMAGEN incluida
-                    system=vision_system,
-                    timeout=cfg_vision["timeout"],
-                    temperature=cfg_vision["temperature"],
-                    max_tokens=cfg_vision["max_tokens"],
-                    enable_thinking=is_qwen_vision
-                )
-
-                vision_data = _parse_json_response(vision_resp)
-
-                # Extraer texto completo si el modelo lo devolvió
-                if vision_data.get("texto_completo"):
-                    ctx["vision_text"] = str(vision_data.pop("texto_completo", ""))
-                    # Combinar OCR + texto visual para máxima cobertura
-                    ctx["combined_text"] = (
-                        ctx["ocr_text"] + "\n\n[AGENTE VISUAL]\n" + ctx["vision_text"]
-                    ).strip()
-
-                # Guardar campos del agente visual (sin sobrescribir nulos)
-                ctx["vision_fields"] = {
-                    k: v for k, v in vision_data.items()
-                    if v is not None and v not in ("", "null", "None")
-                }
-
-                # Merge inicial de campos (el Extractor los consolidará)
-                for k, v in ctx["vision_fields"].items():
-                    if k not in ctx["fields"] or not ctx["fields"][k]:
-                        ctx["fields"][k] = v
-
-                # Guardar resultado del agente Visual con herencia del OCR + debug info
-                ctx["agent_results"]["vision"] = {
-                    "modelo": vision_model_to_use,
-                    "campos_detectados": {k: str(v) for k, v in ctx["vision_fields"].items()},
-                    "texto_adicional": ctx["vision_text"][:300] if ctx["vision_text"] else "",
-                    "heredado_de_ocr": ctx["agent_results"]["ocr"].get("campos_detectados", {}),
-                    # Datos de depuración: prompt enviado y respuesta raw
-                    "debug_prompt": vision_prompt_sent[:3000],
-                    "debug_system": vision_system[:1000] if vision_system else "",
-                    "debug_raw_response": vision_raw[:3000],
-                    "debug_thinking": vision_thinking[:2000] if vision_thinking else ""
-                }
-
-                yield self._emit("vision", "done", {
-                    "title": "Agente Visual completado",
-                    "message": f"Detectados {len(ctx['vision_fields'])} campos en la imagen",
-                    "fields_found": list(ctx["vision_fields"].keys()),
-                    "preview": ctx["vision_text"][:300] if ctx["vision_text"] else ""
-                })
-            except Exception as e:
-                logger.error(f"Vision error: {e}")
+            vision_model_to_use = _resolve_vision_model(
+                cfg_vision["modelo"] or vision_model,
+                vision_model,
+                self._available_models,
+            )
+            if not vision_model_to_use:
                 yield self._emit("vision", "error", {
-                    "title": "Agente Visual falló (continuando)",
-                    "message": str(e)[:200]
+                    "title": "Agente Visual omitido",
+                    "message": "No hay modelo de vision (moondream) en Ollama",
                 })
+                vision_model_to_use = None
+
+            if vision_model_to_use:
+                yield self._emit("vision", "running", {
+                    "title": "Agente Visual — Análisis de imagen",
+                    "message": f"Analizando imagen con {vision_model_to_use} + contexto OCR...",
+                })
+                try:
+                    vision_prompt = (
+                        cfg_vision["prompt"]
+                        if cfg_vision["prompt"]
+                        else build_vision_prompt(ctx["ocr_text"])
+                    )
+                    vision_system = (
+                        cfg_vision["system_prompt"]
+                        if cfg_vision["system_prompt"]
+                        else VISION_SYSTEM_PROMPT
+                    )
+                    is_qwen_vision = "qwen" in vision_model_to_use.lower()
+                    if is_qwen_vision and vision_prompt.startswith("/think\n"):
+                        vision_prompt = vision_prompt[len("/think\n"):]
+
+                    vision_resp, vision_prompt_sent, vision_raw, vision_thinking = _ollama_generate(
+                        model=vision_model_to_use,
+                        prompt=vision_prompt,
+                        image_b64=img_b64,
+                        system=vision_system,
+                        timeout=cfg_vision["timeout"],
+                        temperature=cfg_vision["temperature"],
+                        max_tokens=cfg_vision["max_tokens"],
+                        enable_thinking=is_qwen_vision,
+                    )
+
+                    vision_data = _parse_json_response(vision_resp)
+                    if not vision_data and vision_raw:
+                        vision_data = _parse_json_response(vision_raw)
+                    if not vision_data and vision_raw:
+                        vision_data = _extract_fields_from_thinking(vision_raw)
+                    if not vision_data and vision_thinking:
+                        vision_data = _extract_fields_from_thinking(vision_thinking)
+
+                    if vision_data.get("texto_completo"):
+                        ctx["vision_text"] = str(vision_data.pop("texto_completo", ""))
+                        ctx["combined_text"] = (
+                            ctx["ocr_text"] + "\n\n[AGENTE VISUAL]\n" + ctx["vision_text"]
+                        ).strip()
+                    elif vision_raw and not ctx["vision_text"]:
+                        ctx["vision_text"] = vision_raw[:4000]
+                        ctx["combined_text"] = (
+                            ctx["ocr_text"] + "\n\n[AGENTE VISUAL]\n" + ctx["vision_text"]
+                        ).strip()
+
+                    ctx["vision_fields"] = {
+                        k: v
+                        for k, v in vision_data.items()
+                        if v is not None and v not in ("", "null", "None")
+                    }
+
+                    for k, v in ctx["vision_fields"].items():
+                        if k not in ctx["fields"] or not ctx["fields"][k]:
+                            ctx["fields"][k] = v
+
+                    ctx["agent_results"]["vision"] = {
+                        "modelo": vision_model_to_use,
+                        "campos_detectados": {k: str(v) for k, v in ctx["vision_fields"].items()},
+                        "texto_adicional": ctx["vision_text"][:300] if ctx["vision_text"] else "",
+                        "heredado_de_ocr": ctx["agent_results"]["ocr"].get("campos_detectados", {}),
+                        "debug_prompt": vision_prompt_sent[:3000],
+                        "debug_system": vision_system[:1000] if vision_system else "",
+                        "debug_raw_response": vision_raw[:3000],
+                        "debug_thinking": vision_thinking[:2000] if vision_thinking else "",
+                    }
+
+                    yield self._emit("vision", "done", {
+                        "title": "Agente Visual completado",
+                        "message": f"Detectados {len(ctx['vision_fields'])} campos en la imagen",
+                        "fields_found": list(ctx["vision_fields"].keys()),
+                        "preview": ctx["vision_text"][:300] if ctx["vision_text"] else "",
+                    })
+                except Exception as e:
+                    logger.error(f"Vision error: {e}")
+                    yield self._emit("vision", "error", {
+                        "title": "Agente Visual falló (continuando)",
+                        "message": str(e)[:200],
+                    })
         else:
             reason = "Motor IA no disponible (Ollama offline)" if not vision_model else "PDF sin conversión de imagen"
             yield self._emit("vision", "info", {
@@ -1403,14 +1446,20 @@ class DocumentPipelineAgent:
         # Recibe: IMAGEN + texto OCR + campos del Agente Visual
         # Produce: campos estructurados consolidados
         cfg_extractor = self._get_agent_config("extractor")
-        extractor_model_to_use = cfg_extractor["modelo"] or text_model
-        if self._available_models is not None:
-            resolved = _find_best_model([extractor_model_to_use], self._available_models)
-            if resolved:
-                extractor_model_to_use = resolved
-        extractor_model_to_use = _coerce_multimodal_model(
-            extractor_model_to_use, vision_model, bool(img_b64)
-        )
+        if img_b64:
+            extractor_model_to_use = _resolve_vision_model(
+                cfg_extractor["modelo"] or vision_model,
+                vision_model,
+                self._available_models,
+            )
+        else:
+            extractor_model_to_use = cfg_extractor["modelo"] or text_model
+            if self._available_models is not None:
+                resolved = _find_best_model(
+                    [extractor_model_to_use], self._available_models
+                )
+                if resolved:
+                    extractor_model_to_use = resolved
         yield self._emit("extraction", "running", {
             "title": "Agente Extractor — Consolidación de campos",
             "message": f"Extrayendo campos con {extractor_model_to_use} + regex sobre texto OCR y campos visuales..."
@@ -1447,10 +1496,15 @@ class DocumentPipelineAgent:
                 if is_qwen_extractor and extractor_prompt.startswith("/think\n"):
                     extractor_prompt = extractor_prompt[len("/think\n"):]
 
+                extractor_image = (
+                    img_b64
+                    if extractor_model_to_use and _model_supports_vision(extractor_model_to_use)
+                    else None
+                )
                 llm_resp, extractor_prompt_sent, extractor_raw, extractor_thinking = _ollama_generate(
                     model=extractor_model_to_use,
                     prompt=extractor_prompt,
-                    image_b64=img_b64,                    # ← IMAGEN incluida
+                    image_b64=extractor_image,
                     system=extractor_system,
                     timeout=cfg_extractor["timeout"],
                     temperature=cfg_extractor["temperature"],
@@ -1777,6 +1831,12 @@ class DocumentPipelineAgent:
 
             # Auditoría con LLM si está disponible (para detectar anomalías semánticas)
             auditor_model_to_use = cfg_auditor["modelo"] or llama_model or text_model
+            if self._available_models is not None:
+                resolved_auditor = _find_best_model(
+                    [auditor_model_to_use], self._available_models
+                )
+                if resolved_auditor:
+                    auditor_model_to_use = resolved_auditor
             if auditor_model_to_use and not dup:  # No auditar duplicados con LLM
                 try:
                     if cfg_auditor["prompt"]:
@@ -1788,10 +1848,15 @@ class DocumentPipelineAgent:
                         )
 
                     auditor_system = cfg_auditor["system_prompt"] if cfg_auditor["system_prompt"] else AUDITOR_SYSTEM_PROMPT
+                    audit_image = (
+                        img_b64
+                        if _model_supports_vision(auditor_model_to_use)
+                        else None
+                    )
                     audit_resp, audit_prompt_sent, audit_raw, audit_thinking = _ollama_generate(
                         model=auditor_model_to_use,
                         prompt=audit_prompt,
-                        image_b64=img_b64,              # ← IMAGEN incluida (llama3.2 vision)
+                        image_b64=audit_image,
                         system=auditor_system,
                         timeout=cfg_auditor["timeout"],
                         temperature=cfg_auditor["temperature"],

@@ -41,6 +41,34 @@ VISION_MODELS_PREFERENCE = [
 MIN_WORDS = 10
 
 
+def _sanitize_repetitive_ocr(text: str) -> str:
+    """Recorta bucles de moondream (misma frase repetida muchas veces)."""
+    if not text:
+        return text
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return text.strip()
+    from collections import Counter
+
+    counts = Counter(lines)
+    if lines:
+        top_line, top_n = counts.most_common(1)[0]
+        if top_n >= 4 and top_n / len(lines) > 0.35:
+            logger.warning(
+                "OCR moondream: frase repetida (%dx), recortando salida",
+                top_n,
+            )
+            unique = []
+            seen = set()
+            for ln in lines:
+                if ln in seen:
+                    continue
+                seen.add(ln)
+                unique.append(ln)
+            return "\n".join(unique[:80])
+    return text.strip()
+
+
 def _is_desktop_sidecar() -> bool:
     """Instalador Tauri (PyInstaller): OCR neuronal via Ollama, sin EasyOCR/torch."""
     import sys
@@ -292,15 +320,10 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
         img_b64 = base64.b64encode(img_data).decode()
 
         prompt = (
-            "Eres un experto en lectura de documentos contables latinoamericanos. "
-            "Extrae TODO el texto visible en esta imagen de documento (factura, boleta, recibo, etc.).\n\n"
-            "INSTRUCCIONES:\n"
-            "- Transcribe el texto EXACTAMENTE como aparece, incluyendo números, fechas y símbolos\n"
-            "- Preserva la estructura del documento (encabezado, tabla de items, totales)\n"
-            "- Incluye: RUT/RUC, número de documento, fecha, nombre del emisor, items, montos\n"
-            "- Para texto manuscrito: transcribe lo que puedas leer, marca con [?] lo ilegible\n"
-            "- NO agregues interpretaciones ni comentarios, solo el texto del documento\n\n"
-            "TEXTO DEL DOCUMENTO:"
+            "Transcribe literally all visible text on this receipt or invoice photo.\n"
+            "Output only the text lines and numbers you read (merchant name, date, items, totals, tax IDs).\n"
+            "Do NOT describe the image. Do NOT repeat the same sentence. No commentary.\n"
+            "Start with the first line of text on the document:"
         )
 
         payload = {
@@ -308,13 +331,19 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
             "prompt": prompt,
             "images": [img_b64],
             "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 1500}
+            "options": {
+                "temperature": 0.0,
+                "num_predict": 900,
+                "repeat_penalty": 1.2,
+            },
         }
 
         resp = requests.post(f"{OLLAMA_URL}/api/generate",
                              json=payload, timeout=180)
         if resp.status_code == 200:
-            text = resp.json().get('response', '').strip()
+            text = _sanitize_repetitive_ocr(
+                resp.json().get("response", "").strip()
+            )
             logger.info(f"VLLM ({model}): {_word_count(text)} palabras")
             return text
         else:

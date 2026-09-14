@@ -3368,7 +3368,7 @@ async function reprocessDocument(docId) {
       showSection('nuevo-gasto');
       setTimeout(() => {
         // Simulate pipeline with the existing file
-        fetch(`${API}/api/empresas/${state.empresa.id}/process-stream?file_name=${d.file_name}&original_name=${encodeURIComponent(d.original_name || 'documento')}`, {
+        fetch(`${API}/api/empresas/${state.empresa.id}/documentos/process-stream?file_name=${encodeURIComponent(d.file_name)}&original_filename=${encodeURIComponent(d.original_name || d.original_filename || 'documento')}`, {
           headers: { 'Accept': 'text/event-stream' }
         }).then(resp => {
           const reader = resp.body.getReader();
