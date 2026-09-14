@@ -7,7 +7,8 @@ src-tauri/target/
 src-tauri/gen/
 
 # Sidecar generado por build-backend (binario grande, se regenera)
-src-tauri/binaries/
+src-tauri/binaries/*
+!src-tauri/binaries/README.md
 
 # Node
 node_modules/

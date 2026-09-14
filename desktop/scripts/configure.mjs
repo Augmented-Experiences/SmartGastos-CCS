@@ -12,6 +12,7 @@
 // Se ejecuta automáticamente antes de 'npm run build' / 'npm run dev'.
 // ============================================================
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,6 +73,65 @@ function bundleTargetsForHost() {
 }
 
 const bundleTargets = bundleTargetsForHost();
+
+function rustHostTriple() {
+  try {
+    const out = execSync("rustc -vV", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const line = out.split("\n").find((l) => l.startsWith("host: "));
+    return line ? line.slice("host: ".length).trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function expectedSidecarRelative() {
+  const triple = rustHostTriple();
+  if (!triple) return null;
+  const ext = process.platform === "win32" ? ".exe" : "";
+  return `src-tauri/binaries/backend-${triple}${ext}`;
+}
+
+function assertSidecarForTauri() {
+  const rel = expectedSidecarRelative();
+  if (!rel) {
+    console.error("");
+    console.error("ERROR: no se pudo obtener el target de Rust (rustc -vV).");
+    console.error("       Instale Rust y reinicie la terminal: rustup default stable-msvc");
+    process.exit(1);
+  }
+  const full = resolve(DESKTOP, rel);
+  if (existsSync(full)) {
+    console.log(`configure.mjs: sidecar OK (${rel.replace(/\\/g, "/")})`);
+    return;
+  }
+  mkdirSync(resolve(DESKTOP, "src-tauri/binaries"), { recursive: true });
+  console.error("");
+  console.error("ERROR: Falta el sidecar del backend para Tauri (bundle.externalBin).");
+  console.error("");
+  console.error(`  Archivo esperado:`);
+  console.error(`    ${rel}`);
+  console.error("");
+  console.error("  Genérelo antes de npm run build (PyInstaller + copia a binaries/):");
+  if (process.platform === "win32") {
+    console.error(
+      "    powershell -ExecutionPolicy Bypass -File desktop\\scripts\\build-backend.ps1"
+    );
+    console.error("  Para MSI/NSIS en un solo paso:");
+    console.error(
+      "    powershell -ExecutionPolicy Bypass -File desktop\\scripts\\build-backend.ps1 -Installer"
+    );
+  } else {
+    console.error("    ./desktop/scripts/build-backend.sh");
+  }
+  console.error("");
+  console.error(
+    "  Sin ese binario, tauri-build falla al empaquetar externalBin: binaries/backend."
+  );
+  process.exit(1);
+}
 
 // --- 1) tauri.conf.json ---
 const tauriConf = {
@@ -240,3 +300,5 @@ try {
 console.log(
   `configure.mjs: '${productName}' (${pkg}) - accent ${accent}, dataDir ${dataDirName}, bundles [${bundleTargets.join(", ")}] (${process.platform})`
 );
+
+assertSidecarForTauri();
