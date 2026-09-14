@@ -1,0 +1,20 @@
+{
+  "dataDirName": "SmartGastos",
+  "ollamaTiers": [
+    {
+      "maxRamGb": 6,
+      "model": "llama3.2:1b"
+    },
+    {
+      "maxRamGb": 12,
+      "model": "llama3.2:3b"
+    },
+    {
+      "maxRamGb": 0,
+      "model": "llama3.1:8b"
+    }
+  ],
+  "extraModels": [
+    "moondream"
+  ]
+}

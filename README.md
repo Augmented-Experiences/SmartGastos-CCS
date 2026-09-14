@@ -1,6 +1,6 @@
-# Pyme Ledger AI
+# SmartGastos (Pyme Ledger AI)
 
-> Gestión inteligente de documentos contables para PyMEs — 100% local, sin internet.
+> Gestión inteligente de gastos y documentos contables para PyMEs — 100% local, sin internet. Producto **CCCE** (Cámara Colombiana de Comercio Electrónico).
 
 ## Descripción
 
@@ -150,6 +150,16 @@ pyme-ledger-ai/
 - **Sin telemetría**: no se envían datos a servidores externos
 - **Datos locales**: toda la información se almacena en SQLite en el directorio del plugin
 - **Código abierto**: todo el código es auditable
+
+---
+
+## Instalador de escritorio (SmartSuite / Tauri)
+
+Además del plugin Pinokio, este repo incluye el kit **SmartSuite** en `desktop/` (Tauri + splash + sidecar PyInstaller), configurado vía `desktop/smartsuite.config.json` (acento `#2E9E3F`, modelo de visión **moondream** para OCR neuronal vía Ollama).
+
+- Dependencias del sidecar: `requirements-desktop.txt` (sin `easyocr` ni `torch`).
+- Build local: ver `desktop/README.md` y `desktop/WINDOWS-BUILD.md`.
+- CI opcional: workflow `.github/workflows/desktop-build.yml` (tags `v*` o manual).
 
 ---
 

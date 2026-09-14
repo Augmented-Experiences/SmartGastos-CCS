@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SmartCaja</title>
+  <!-- Marca CCCE compartida + acento por-herramienta (generados por configure.mjs) -->
+  <link rel="stylesheet" href="ccce-theme.css" />
+  <link rel="stylesheet" href="accent.css" />
+  <style>
+    /* Mapea los nombres locales a las variables del brand kit CCCE. */
+    :root { --navy: var(--ccce-azul-oscuro); --gold: var(--ccce-accent); --red: var(--ccce-rojo); }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 30%, #1e4a94 0%, #0f2a5a 100%);
+      color: #fff; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
+    }
+    .brand { font-size: 34px; font-weight: 800; letter-spacing: 0.5px; }
+    .brand .accent { color: var(--gold); }
+    .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
+    .track { width: 300px; max-width: 80vw; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.15); position: relative; }
+    /* Barra determinada */
+    .fill { height: 100%; width: 0%; border-radius: 8px; background: linear-gradient(90deg, var(--navy), var(--red), var(--gold)); transition: width 0.4s ease; }
+    /* Barra indeterminada */
+    .track.indeterminate .fill { width: 40% !important; position: absolute; left: -40%; animation: slide 1.2s infinite ease-in-out; }
+    @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+    .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
+    .pct { color: var(--gold); font-weight: 700; font-size: 13px; min-height: 16px; }
+    .enter {
+      margin-top: 6px; padding: 9px 22px; border-radius: 10px; border: 0; cursor: pointer;
+      background: linear-gradient(135deg, var(--gold), #E0A800); color: var(--navy);
+      font-weight: 700; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    }
+    .enter.show { opacity: 1; pointer-events: auto; }
+    .enter:hover { filter: brightness(1.05); }
+    .foot { position: absolute; bottom: 18px; color: #9fb2d6; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <div class="brand">Smart<span class="accent">Caja</span></div>
+  <div class="sub">Preparando tu asistente de flujo de caja con IA local…</div>
+  <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
+  <div class="pct" id="pct"></div>
+  <div class="status" id="status">Iniciando servicios…</div>
+  <button class="enter" id="enter">Entrar ahora</button>
+  <div class="foot">Cámara Colombiana de Comercio Electrónico (CCCE)</div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const pctEl = document.getElementById('pct');
+    const fillEl = document.getElementById('fill');
+    const trackEl = document.getElementById('track');
+    const enterBtn = document.getElementById('enter');
+
+    let backendUrl = null;
+    let navigated = false;
+
+    function goToApp() {
+      if (navigated || !backendUrl) return;
+      navigated = true;
+      window.location.replace(backendUrl);
+    }
+
+    function render(s) {
+      if (!s) return;
+      if (s.message) statusEl.textContent = s.message;
+      if (typeof s.percent === 'number' && s.percent >= 0) {
+        trackEl.classList.remove('indeterminate');
+        fillEl.style.width = s.percent + '%';
+        pctEl.textContent = s.percent + '%';
+      } else {
+        trackEl.classList.add('indeterminate');
+        pctEl.textContent = '';
+      }
+      if (s.backend_url) backendUrl = s.backend_url;
+      if (s.can_continue) enterBtn.classList.add('show');
+      // Entrar automáticamente cuando el backend está listo y Ollama terminó.
+      if (s.can_continue && s.ollama_done) {
+        setTimeout(goToApp, 600);
+      }
+    }
+
+    enterBtn.addEventListener('click', goToApp);
+
+    // Integración con Tauri (withGlobalTauri): estado inicial + eventos en vivo.
+    function initTauri() {
+      const t = window.__TAURI__;
+      if (!t || !t.event || !t.core) { return false; }
+      t.core.invoke('current_status').then(render).catch(() => {});
+      t.event.listen('status', (e) => render(e.payload));
+      return true;
+    }
+    if (!initTauri()) {
+      // Reintentar por si __TAURI__ aún no está inyectado.
+      let tries = 0;
+      const iv = setInterval(() => {
+        if (initTauri() || ++tries > 50) clearInterval(iv);
+      }, 100);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "$comment": "Ejemplo de config para SmartGastos (repo pyme-ledger-ai.pinokio). Copiar como desktop/smartsuite.config.json en ese repo. SmartGastos ya respeta la variable DATA_DIR y usa PORT por entorno: no requiere parches.",
+  "productName": "SmartGastos",
+  "identifier": "co.org.ccce.smartgastos",
+  "version": "1.0.0",
+  "dataDirName": "SmartGastos",
+  "accent": "#2E9E3F",
+  "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
+  "shortDescription": "Gestión de gastos/contabilidad con IA local (CCCE)",
+  "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE).",
+  "ollama": {
+    "tiers": [
+      { "maxRamGb": 6, "model": "llama3.2:1b" },
+      { "maxRamGb": 12, "model": "llama3.2:3b" },
+      { "maxRamGb": 0, "model": "llama3.1:8b" }
+    ],
+    "extraModels": ["moondream"],
+    "$comment_extra": "moondream (~1.7 GB) es el modelo de visión que SmartGastos usa para OCR neuronal (auto-detectado). Se descarga con progreso en el arranque, igual que el modelo del LLM — así el OCR neuronal no requiere torch/easyocr en el instalador."
+  },
+  "pyinstaller": {
+    "$comment": "El OCR neuronal (easyocr → torch) es opcional y de carga diferida; se excluye para mantener el instalador liviano. El OCR con Tesseract (pytesseract) sigue disponible si el binario está presente.",
+    "excludes": ["easyocr", "torch", "torchvision", "scipy", "skimage", "scikit_image", "cv2", "ninja"]
+  }
+}
