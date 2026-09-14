@@ -11,7 +11,7 @@ use std::time::Duration;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-use tauri::{Emitter, Manager, RunEvent, Url, WebviewUrl};
+use tauri::{Emitter, Manager, RunEvent, Url};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -250,7 +250,7 @@ fn navigate_webview_external(app: &tauri::AppHandle, url_str: &str) -> Result<()
         .get_webview_window("main")
         .ok_or_else(|| "ventana main no encontrada".to_string())?;
     window
-        .navigate(WebviewUrl::External(parsed))
+        .navigate(parsed)
         .map_err(|e| format!("navigate fallo: {}", e))?;
     ollama_log(&format!("WebView navigate OK -> {}", url_str));
     Ok(())
@@ -264,7 +264,9 @@ fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) {
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.show();
         }
-        navigate_webview_external(&app, &url)
+        if let Err(e) = navigate_webview_external(&app, &url) {
+            ollama_log(&format!("open_splash_on_backend navigate: {}", e));
+        }
     }) {
         Ok(()) => ollama_log("open_splash_on_backend: run_on_main_thread OK"),
         Err(e) => ollama_log(&format!("open_splash_on_backend: run_on_main_thread {}", e)),
@@ -561,7 +563,7 @@ fn main() {
                 let _ = w.hide();
             }
 
-            kill_backend_child(app.state::<BackendState>());
+            kill_backend_child(&*app.state::<BackendState>());
             let port = pick_port();
             app.manage(BackendPort(port));
             ollama_log(&format!("Puerto backend elegido: {}", port));
@@ -635,7 +637,7 @@ fn main() {
         .expect("error al construir la app de escritorio")
         .run(|app_handle, event| {
             if matches!(event, RunEvent::Exit) {
-                kill_backend_child(app_handle.state::<BackendState>());
+                kill_backend_child(&*app_handle.state::<BackendState>());
             }
         });
 }
