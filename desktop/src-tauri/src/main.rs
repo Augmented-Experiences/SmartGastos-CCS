@@ -594,7 +594,8 @@ fn main() {
             ollama_log(&format!("Puerto backend elegido: {}", port));
 
             let data_dir = user_data_dir().to_string_lossy().to_string();
-            if app.state::<BackendState>().0.lock().unwrap().is_some() {
+            let backend_state = app.state::<BackendState>();
+            if backend_state.0.lock().unwrap().is_some() {
                 ollama_log("WARN: sidecar ya registrado; omitiendo segundo spawn");
             }
             let sidecar = app.shell().sidecar("backend");
@@ -607,7 +608,8 @@ fn main() {
                     .spawn()
                 {
                     Ok((mut rx, child)) => {
-                        let mut slot = app.state::<BackendState>().0.lock().unwrap();
+                        let backend_state = app.state::<BackendState>();
+                        let mut slot = backend_state.0.lock().unwrap();
                         if slot.is_some() {
                             ollama_log("WARN: sidecar slot ocupado; matando instancia duplicada");
                             let _ = slot.take().map(|c| c.kill());
