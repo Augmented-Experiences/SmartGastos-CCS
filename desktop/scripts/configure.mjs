@@ -57,7 +57,21 @@ function escapeHtml(s) {
 
 const pkg = cargoPackageName();
 const splashSubtitle =
-  cfg.splashSubtitle || cfg.shortDescription || `Preparando ${productName}…`;
+  cfg.splashSubtitle || cfg.shortDescription || `Preparando ${productName}...`;
+
+/** Bundle formats valid on the machine running the build (Tauri CLI is host-specific). */
+function bundleTargetsForHost() {
+  switch (process.platform) {
+    case "win32":
+      return ["msi", "nsis"];
+    case "darwin":
+      return ["dmg"];
+    default:
+      return ["deb", "rpm", "appimage"];
+  }
+}
+
+const bundleTargets = bundleTargetsForHost();
 
 // --- 1) tauri.conf.json ---
 const tauriConf = {
@@ -84,8 +98,7 @@ const tauriConf = {
   },
   bundle: {
     active: true,
-    // MSI + NSIS en Windows; demás SO en sus formatos nativos.
-    targets: ["msi", "nsis", "deb", "rpm", "appimage", "dmg"],
+    targets: bundleTargets,
     icon: [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -211,5 +224,5 @@ try {
 }
 
 console.log(
-  `configure.mjs: '${productName}' (${pkg}) — accent ${accent}, dataDir ${dataDirName}, bundles msi+nsis+…`
+  `configure.mjs: '${productName}' (${pkg}) - accent ${accent}, dataDir ${dataDirName}, bundles [${bundleTargets.join(", ")}] (${process.platform})`
 );
