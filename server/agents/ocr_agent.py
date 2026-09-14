@@ -42,31 +42,30 @@ MIN_WORDS = 10
 
 
 def _sanitize_repetitive_ocr(text: str) -> str:
-    """Recorta bucles de moondream (misma frase repetida muchas veces)."""
-    if not text:
-        return text
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    if not lines:
-        return text.strip()
+    """Recorta bucles de moondream sin vaciar transcripciones validas."""
+    original = (text or "").strip()
+    if not original:
+        return original
+    lines = [ln.strip() for ln in original.splitlines() if ln.strip()]
+    if len(lines) < 5:
+        return original
     from collections import Counter
 
-    counts = Counter(lines)
-    if lines:
-        top_line, top_n = counts.most_common(1)[0]
-        if top_n >= 4 and top_n / len(lines) > 0.35:
-            logger.warning(
-                "OCR moondream: frase repetida (%dx), recortando salida",
-                top_n,
-            )
-            unique = []
-            seen = set()
-            for ln in lines:
-                if ln in seen:
-                    continue
-                seen.add(ln)
-                unique.append(ln)
-            return "\n".join(unique[:80])
-    return text.strip()
+    top_line, top_n = Counter(lines).most_common(1)[0]
+    if top_n < 5 or top_n / len(lines) <= 0.4:
+        return original
+    unique: list[str] = []
+    seen: set[str] = set()
+    for ln in lines:
+        if ln in seen:
+            continue
+        seen.add(ln)
+        unique.append(ln)
+    deduped = "\n".join(unique[:120]).strip()
+    if _word_count(deduped) >= MIN_WORDS:
+        logger.warning("OCR moondream: frase repetida (%dx), salida deduplicada", top_n)
+        return deduped
+    return original
 
 
 def _is_desktop_sidecar() -> bool:
@@ -319,36 +318,44 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
 
         img_b64 = base64.b64encode(img_data).decode()
 
-        prompt = (
-            "Transcribe literally all visible text on this receipt or invoice photo.\n"
-            "Output only the text lines and numbers you read (merchant name, date, items, totals, tax IDs).\n"
-            "Do NOT describe the image. Do NOT repeat the same sentence. No commentary.\n"
-            "Start with the first line of text on the document:"
-        )
-
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "images": [img_b64],
-            "stream": False,
-            "options": {
-                "temperature": 0.0,
-                "num_predict": 900,
-                "repeat_penalty": 1.2,
-            },
-        }
-
-        resp = requests.post(f"{OLLAMA_URL}/api/generate",
-                             json=payload, timeout=180)
-        if resp.status_code == 200:
+        prompts = [
+            (
+                "Eres un experto en lectura de documentos contables latinoamericanos. "
+                "Transcribe TODO el texto visible en esta imagen (factura, boleta, recibo).\n"
+                "Escribe linea por linea el texto y numeros tal como aparecen (proveedor, fecha, items, totales, RUT).\n"
+                "NO describas la imagen. NO repitas la misma frase. Sin comentarios ni coordenadas.\n\n"
+                "TEXTO DEL DOCUMENTO:"
+            ),
+            "Transcribe all visible text on this receipt. One line per row of text. Numbers and dates included. Text only:",
+        ]
+        options = {"temperature": 0.1, "num_predict": 1500, "repeat_penalty": 1.05}
+        text = ""
+        for prompt in prompts:
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "images": [img_b64],
+                "stream": False,
+                "options": options,
+            }
+            resp = requests.post(
+                f"{OLLAMA_URL}/api/generate", json=payload, timeout=180
+            )
+            if resp.status_code != 200:
+                logger.warning(
+                    "Ollama VLLM HTTP %s body=%s", resp.status_code, resp.text[:200]
+                )
+                continue
             text = _sanitize_repetitive_ocr(
                 resp.json().get("response", "").strip()
             )
-            logger.info(f"VLLM ({model}): {_word_count(text)} palabras")
+            if _word_count(text) >= MIN_WORDS:
+                break
+        if text:
+            logger.info("VLLM (%s): %s palabras", model, _word_count(text))
             return text
-        else:
-            logger.warning("Ollama VLLM HTTP %s body=%s", resp.status_code, resp.text[:200])
-            return ""
+        logger.warning("VLLM (%s): transcripcion vacia o muy corta", model)
+        return ""
     except Exception as e:
         logger.warning("VLLM Ollama falló (model=%s): %s", model, e)
         return ""

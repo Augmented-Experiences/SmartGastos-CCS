@@ -66,6 +66,51 @@ VISION_DEFAULT_MODEL = "moondream"  # Default para agente visual (DEBE ser multi
 VISION_MODELS = ["moondream", "llava:7b", "minicpm-v", "llava:13b"]  # Modelos con soporte de imagen
 TEXT_MODELS   = ["qwen3:0.6b", "qwen3:1.7b", "llama3.2:3b", "llama3:8b"]  # Fallback genérico
 LLAMA_TEXT_MODELS = ["llama3.2:3b", "llama3:8b", "qwen3:0.6b"]  # Preferencia llama
+DESKTOP_EXTRACTOR_MODELS = [
+    "llama3.1:8b",
+    "llama3.1",
+    "llama3.2:3b",
+    "llama3:8b",
+    "llama3.2:3b",
+] + TEXT_MODELS
+
+_BBOX_VALUE_RE = re.compile(r"^\s*\[[\s\d\.,]+\]\s*$")
+
+
+def _desktop_sidecar() -> bool:
+    import sys
+
+    return os.environ.get("RUN_BY_TAURI") == "1" or bool(getattr(sys, "frozen", False))
+
+
+def _vision_raw_is_noise(text: str) -> bool:
+    if not text:
+        return True
+    s = text.strip()
+    if _BBOX_VALUE_RE.match(s):
+        return True
+    if len(s) < 40 and re.search(r"\b0\.\d+\b", s) and "[" in s:
+        return True
+    return False
+
+
+def _filter_vision_fields(data: Dict) -> Dict:
+    """Quita bbox/coordenadas; conserva campos contables."""
+    if not data:
+        return {}
+    out: Dict = {}
+    for k, v in data.items():
+        kl = str(k).lower()
+        if any(x in kl for x in ("bbox", "bounding", "coordinate", "x_min", "y_min", "x_max", "y_max")):
+            continue
+        if isinstance(v, list) and len(v) == 4 and all(isinstance(x, (int, float)) for x in v):
+            continue
+        if isinstance(v, str) and _vision_raw_is_noise(v):
+            continue
+        if v is None or v in ("", "null", "None"):
+            continue
+        out[k] = v
+    return out
 
 
 # ── Utilidades Ollama ─────────────────────────────────────────────────────────────
@@ -1309,6 +1354,8 @@ class DocumentPipelineAgent:
 
             ctx["ocr_text"] = ocr_result["text"]
             ctx["combined_text"] = ocr_result["text"]
+            if _desktop_sidecar() and not ctx["combined_text"]:
+                logger.warning("Desktop OCR moondream devolvio texto vacio")
             # Guardar resultado del agente OCR
             ctx["agent_results"]["ocr"] = {
                 "metodo": ocr_result.get("method", "tesseract"),
@@ -1336,9 +1383,13 @@ class DocumentPipelineAgent:
             })
 
         # ── PASO 2: Agente Visual ─────────────────────────────────────────────
-        # Recibe: IMAGEN (base64) + texto OCR del paso anterior
-        # Produce: campos visuales + texto adicional
-        if vision_model and img_b64:
+        # Desktop: moondream ya transcribio en OCR; extraccion con llama texto.
+        if _desktop_sidecar():
+            yield self._emit("vision", "info", {
+                "title": "Agente Visual omitido (desktop)",
+                "message": "OCR neuronal (moondream) ya transcribio el documento; campos con modelo de texto.",
+            })
+        elif vision_model and img_b64:
             cfg_vision = self._get_agent_config("vision")
             vision_model_to_use = _resolve_vision_model(
                 cfg_vision["modelo"] or vision_model,
@@ -1396,17 +1447,20 @@ class DocumentPipelineAgent:
                         ctx["combined_text"] = (
                             ctx["ocr_text"] + "\n\n[AGENTE VISUAL]\n" + ctx["vision_text"]
                         ).strip()
-                    elif vision_raw and not ctx["vision_text"]:
+                    elif vision_raw and not ctx["vision_text"] and not _vision_raw_is_noise(vision_raw):
                         ctx["vision_text"] = vision_raw[:4000]
                         ctx["combined_text"] = (
                             ctx["ocr_text"] + "\n\n[AGENTE VISUAL]\n" + ctx["vision_text"]
                         ).strip()
 
-                    ctx["vision_fields"] = {
-                        k: v
-                        for k, v in vision_data.items()
-                        if v is not None and v not in ("", "null", "None")
-                    }
+                    vision_data = _filter_vision_fields(vision_data)
+                    ctx["vision_fields"] = _filter_vision_fields(
+                        {
+                            k: v
+                            for k, v in vision_data.items()
+                            if v is not None and v not in ("", "null", "None")
+                        }
+                    )
 
                     for k, v in ctx["vision_fields"].items():
                         if k not in ctx["fields"] or not ctx["fields"][k]:
@@ -1446,7 +1500,17 @@ class DocumentPipelineAgent:
         # Recibe: IMAGEN + texto OCR + campos del Agente Visual
         # Produce: campos estructurados consolidados
         cfg_extractor = self._get_agent_config("extractor")
-        if img_b64:
+        if _desktop_sidecar():
+            extractor_model_to_use = _find_best_model(
+                DESKTOP_EXTRACTOR_MODELS,
+                self._available_models or [],
+            ) or text_model
+            if extractor_model_to_use and _model_supports_vision(extractor_model_to_use):
+                extractor_model_to_use = (
+                    _find_best_model(DESKTOP_EXTRACTOR_MODELS, self._available_models or [])
+                    or text_model
+                )
+        elif img_b64:
             extractor_model_to_use = _resolve_vision_model(
                 cfg_extractor["modelo"] or vision_model,
                 vision_model,
@@ -1462,7 +1526,11 @@ class DocumentPipelineAgent:
                     extractor_model_to_use = resolved
         yield self._emit("extraction", "running", {
             "title": "Agente Extractor — Consolidación de campos",
-            "message": f"Extrayendo campos con {extractor_model_to_use} + regex sobre texto OCR y campos visuales..."
+            "message": (
+                f"Extrayendo campos con {extractor_model_to_use} (solo texto)..."
+                if _desktop_sidecar()
+                else f"Extrayendo campos con {extractor_model_to_use} + regex..."
+            ),
         })
 
         try:
@@ -2077,7 +2145,59 @@ class DocumentPipelineAgent:
         # Hash único
         file_hash = audit.get("hash", "")
         if not file_hash:
-            file_hash = str(uuid.uuid4()).replace("-", "")
+            sha256 = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+            file_hash = sha256.hexdigest()
+
+        existing = self.db.query(Documento).filter(
+            Documento.empresa_id == self.empresa_id,
+            Documento.hash_documento == file_hash,
+        ).first()
+        if existing:
+            logger.info(
+                "Documento duplicado hash=%s: actualizando %s",
+                file_hash[:12],
+                existing.id,
+            )
+            existing.tipo_documento = tipo_enum
+            existing.proveedor = fields.get("proveedor") or existing.proveedor
+            existing.rut_proveedor = fields.get("rut_proveedor") or existing.rut_proveedor
+            existing.fecha_emision = fecha_emision or existing.fecha_emision
+            existing.folio = (
+                str(fields.get("folio", "")) if fields.get("folio") else existing.folio
+            )
+            if to_float(fields.get("monto_total")):
+                existing.monto_total = to_float(fields.get("monto_total"))
+            if to_float(fields.get("monto_neto")):
+                existing.monto_neto = to_float(fields.get("monto_neto"))
+            if to_float(fields.get("iva")):
+                existing.iva = to_float(fields.get("iva"))
+            existing.moneda = str(fields.get("moneda", existing.moneda or "CLP"))
+            existing.categoria_id = classification.get("categoria_id") or existing.categoria_id
+            existing.categoria_sugerida = (
+                classification.get("categoria_sugerida") or existing.categoria_sugerida
+            )
+            existing.confianza_clasificacion = float(
+                classification.get("confianza", existing.confianza_clasificacion or 0.0)
+            )
+            existing.estado_revision = estado
+            existing.ruta_archivo_original = str(file_path)
+            existing.texto_extraido = (
+                ctx["combined_text"][:5000] if ctx["combined_text"] else existing.texto_extraido
+            )
+            existing.campos_extraidos = json.dumps(
+                {"campos": fields, "agent_results": ctx.get("agent_results", {})},
+                ensure_ascii=False,
+            )
+            existing.excepciones = json.dumps(
+                audit.get("excepciones", []), ensure_ascii=False
+            )
+            existing.fecha_actualizacion = datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
 
         doc = Documento(
             id=doc_id,
