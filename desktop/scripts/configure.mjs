@@ -238,7 +238,6 @@ const capabilities = {
     "core:event:default",
     "core:window:default",
     "core:webview:default",
-    "core:webview:allow-set-webview-url",
     "shell:allow-kill",
     "shell:allow-stdin-write",
     {
