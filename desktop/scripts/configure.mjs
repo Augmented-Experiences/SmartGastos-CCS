@@ -228,13 +228,48 @@ strip = true
 `;
 writeFileSync(resolve(DESKTOP, "src-tauri/Cargo.toml"), cargoToml);
 
-// --- 4) capabilities/default.json ---
+// --- 4) capabilities/default.json (sin $schema: gen/ no existe hasta el primer build) ---
 const capabilities = {
-  $schema: "../gen/schemas/desktop-schema.json",
   identifier: "default",
   description: `Permisos base para la ventana principal de ${productName}.`,
   windows: ["main"],
-  permissions: ["core:default", "core:webview:allow-set-webview-url"],
+  remote: {
+    urls: ["http://127.0.0.1:*", "http://localhost:*"],
+  },
+  permissions: [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    {
+      identifier: "core:webview:allow-set-webview-url",
+      allow: [
+        { url: "http://127.0.0.1:*" },
+        { url: "http://localhost:*" },
+      ],
+    },
+    "shell:allow-kill",
+    {
+      identifier: "shell:allow-spawn",
+      allow: [
+        {
+          name: "backend",
+          sidecar: true,
+          args: true,
+        },
+      ],
+    },
+    {
+      identifier: "shell:allow-execute",
+      allow: [
+        {
+          name: "backend",
+          sidecar: true,
+          args: true,
+        },
+      ],
+    },
+  ],
 };
 writeFileSync(
   resolve(DESKTOP, "src-tauri/capabilities/default.json"),
