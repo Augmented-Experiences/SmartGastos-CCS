@@ -153,6 +153,16 @@ pyme-ledger-ai/
 
 ---
 
+## Instalador de escritorio (SmartSuite / Tauri)
+
+Además del plugin Pinokio, este repo incluye el kit **SmartSuite** en `desktop/` (Tauri + splash + sidecar PyInstaller), configurado vía `desktop/smartsuite.config.json` (acento `#2E9E3F`, modelo de visión **moondream** para OCR neuronal vía Ollama).
+
+- Dependencias del sidecar: `requirements-desktop.txt` (sin `easyocr` ni `torch`).
+- Build local: ver `desktop/README.md` y `desktop/WINDOWS-BUILD.md`.
+- CI opcional: workflow `.github/workflows/desktop-build.yml` (tags `v*` o manual).
+
+---
+
 ## Soporte
 
 Para reportar problemas o sugerir mejoras, abrir un issue en el repositorio del proyecto.
