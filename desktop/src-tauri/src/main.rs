@@ -85,6 +85,14 @@ impl Status {
 
 struct AppStatus(Mutex<Status>);
 
+/// Puerto HTTP del sidecar FastAPI (fijado en `setup`).
+struct BackendPort(u16);
+
+/// Ruta que devuelve 200 cuando FastAPI está sirviendo (SmartGastos/SmartCaja).
+const BACKEND_HEALTH_PATH: &str = "/api/health";
+/// Entrada de la UI web empaquetada (StaticFiles en `server/app.py`).
+const BACKEND_UI_PATH: &str = "/ui/";
+
 /// Actualiza el estado compartido y lo emite a la pantalla de carga.
 fn update_status(app: &tauri::AppHandle, f: impl FnOnce(&mut Status)) {
     let snapshot = {
@@ -184,7 +192,7 @@ fn pick_port() -> u16 {
         .unwrap_or(7860)
 }
 
-/// Espera hasta que el puerto acepte conexiones (o se agoten los intentos).
+/// Espera hasta que el puerto acepte conexiones (Ollama u otros servicios TCP).
 fn wait_for_port(port: u16, attempts: u32) -> bool {
     for _ in 0..attempts {
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -193,6 +201,44 @@ fn wait_for_port(port: u16, attempts: u32) -> bool {
         std::thread::sleep(Duration::from_millis(500));
     }
     false
+}
+
+fn backend_health_url(port: u16) -> String {
+    format!("http://127.0.0.1:{}{}", port, BACKEND_HEALTH_PATH)
+}
+
+fn backend_ui_url(port: u16) -> String {
+    format!("http://127.0.0.1:{}{}", port, BACKEND_UI_PATH)
+}
+
+/// Espera hasta que `GET /api/health` responda 200 (no basta con TCP al puerto).
+fn wait_for_backend_ready(port: u16, attempts: u32) -> bool {
+    let url = backend_health_url(port);
+    for _ in 0..attempts {
+        if ureq::get(&url)
+            .call()
+            .map(|r| r.status() == 200)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
+fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
+    let url = backend_ui_url(port);
+    update_status(app, |s| {
+        s.backend_url = Some(url);
+        s.can_continue = true;
+        if s.phase == "starting" || s.phase == "downloading" || s.phase == "ollama" {
+            s.phase = "ready".into();
+        }
+        if s.message.is_empty() || s.message.starts_with("Descargando") || s.message.starts_with("Componente") {
+            s.message = "Servicios listos.".into();
+        }
+    });
 }
 
 /// Modelo de Ollama recomendado según la RAM total del equipo y la config
@@ -268,7 +314,7 @@ fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
 }
 
 /// Deja Ollama listo (best-effort) mostrando el progreso en la pantalla de carga.
-fn bootstrap_ollama(app: tauri::AppHandle) {
+fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
     std::thread::spawn(move || {
         update_status(&app, |s| {
             s.phase = "ollama".into();
@@ -363,8 +409,20 @@ fn bootstrap_ollama(app: tauri::AppHandle) {
             }
         }
 
+        // Tras descargas largas (p. ej. moondream), el hilo de readiness puede haber
+        // expirado antes de que el sidecar respondiera; volver a comprobar HTTP.
+        let ready = app.state::<AppStatus>().0.lock().unwrap().can_continue;
+        if !ready {
+            if wait_for_backend_ready(backend_port, 600) {
+                apply_backend_ready(&app, backend_port);
+            }
+        }
+
         update_status(&app, |s| {
             s.ollama_done = true;
+            if s.can_continue && s.backend_url.is_some() {
+                s.phase = "ready".into();
+            }
         });
     });
 }
@@ -378,6 +436,7 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let port = pick_port();
+            app.manage(BackendPort(port));
 
             // 1) Lanzar el backend empaquetado (sidecar), pasándole el puerto y la
             //    carpeta de datos por entorno (compatible con las apps del SmartSuite).
@@ -406,20 +465,14 @@ fn main() {
             });
 
             // 2) Preparar Ollama con progreso en pantalla.
-            bootstrap_ollama(handle.clone());
+            bootstrap_ollama(handle.clone(), port);
 
-            // 3) Cuando el backend responda, habilitar el ingreso a la UI.
+            // 3) Cuando FastAPI responda en /api/health, habilitar el ingreso a la UI.
             let ready_handle = handle.clone();
             std::thread::spawn(move || {
-                if wait_for_port(port, 240) {
-                    let url = format!("http://127.0.0.1:{}/ui/index.html", port);
-                    update_status(&ready_handle, |s| {
-                        s.backend_url = Some(url);
-                        s.can_continue = true;
-                        if s.phase == "starting" {
-                            s.message = "Servicios listos.".into();
-                        }
-                    });
+                // Hasta ~30 min (arranque lento + descargas Ollama en paralelo).
+                if wait_for_backend_ready(port, 3600) {
+                    apply_backend_ready(&ready_handle, port);
                 }
             });
 

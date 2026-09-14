@@ -11,7 +11,7 @@
 //
 // Se ejecuta automáticamente antes de 'npm run build' / 'npm run dev'.
 // ============================================================
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -197,11 +197,25 @@ writeFileSync(
   `/* Generado por configure.mjs — acento por-herramienta */\n:root { --ccce-accent: ${accent}; }\n`
 );
 
+let logoHtml = "";
+const logoRel = cfg.splashLogo || "../icon.png";
+const logoCandidates = [
+  resolve(DESKTOP, logoRel),
+  resolve(DESKTOP, "..", "icon.png"),
+  resolve(DESKTOP, "brand", "isotipo-ccce.png"),
+];
+const logoSrc = logoCandidates.find((p) => existsSync(p));
+if (logoSrc) {
+  copyFileSync(logoSrc, resolve(DESKTOP, "ui/splash-logo.png"));
+  logoHtml = `<img class="splash-logo" src="splash-logo.png" alt="${escapeHtml(productName)}" />\n  `;
+}
+
 const splashTpl = readFileSync(resolve(DESKTOP, "ui/splash.template.html"), "utf8");
 const splashHtml = splashTpl
   .replaceAll("{{PRODUCT_NAME}}", escapeHtml(productName))
   .replaceAll("{{BRAND_HTML}}", brandHtml(productName))
-  .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle));
+  .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle))
+  .replaceAll("{{LOGO_HTML}}", logoHtml);
 writeFileSync(resolve(DESKTOP, "ui/index.html"), splashHtml);
 
 // --- 7) Cargo.lock: alinear nombre del paquete si cambió ---

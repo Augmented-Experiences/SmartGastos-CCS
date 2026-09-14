@@ -1,10 +1,17 @@
+<!--
+  PLANTILLA DE SPLASH (editar aqui; no index.html — lo genera configure.mjs)
+
+  - Texto / marca: desktop/smartsuite.config.json (productName, splashSubtitle, accent)
+  - Logo: splashLogo en smartsuite.config.json (ruta relativa a desktop/) o ../icon.png en la raiz del repo
+  - Layout y estilos: bloque <style> y clases .brand / .splash-logo / .track abajo
+  - Placeholders: {{PRODUCT_NAME}}, {{BRAND_HTML}}, {{SPLASH_SUBTITLE}}, {{LOGO_HTML}}
+-->
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{PRODUCT_NAME}}</title>
-  <!-- Generado por scripts/configure.mjs — no editar index.html directamente -->
   <link rel="stylesheet" href="ccce-theme.css" />
   <link rel="stylesheet" href="accent.css" />
   <style>
@@ -17,6 +24,7 @@
       color: #fff; display: flex; flex-direction: column; align-items: center;
       justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
     }
+    .splash-logo { width: 72px; height: 72px; object-fit: contain; border-radius: 14px; }
     .brand { font-size: 34px; font-weight: 800; letter-spacing: 0.5px; }
     .brand .accent { color: var(--gold); }
     .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
@@ -37,13 +45,14 @@
   </style>
 </head>
 <body>
+  {{LOGO_HTML}}
   <div class="brand">{{BRAND_HTML}}</div>
   <div class="sub">{{SPLASH_SUBTITLE}}</div>
   <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
   <div class="pct" id="pct"></div>
-  <div class="status" id="status">Iniciando servicios…</div>
+  <div class="status" id="status">Iniciando servicios...</div>
   <button class="enter" id="enter">Entrar ahora</button>
-  <div class="foot">Cámara Colombiana de Comercio Electrónico (CCCE)</div>
+  <div class="foot">Camara Colombiana de Comercio Electronico (CCCE)</div>
 
   <script>
     const statusEl = document.getElementById('status');
@@ -54,11 +63,23 @@
 
     let backendUrl = null;
     let navigated = false;
+    let ollamaDone = false;
+    let canContinue = false;
+    let navigateTimer = null;
 
     function goToApp() {
       if (navigated || !backendUrl) return;
       navigated = true;
       window.location.replace(backendUrl);
+    }
+
+    function maybeNavigate() {
+      if (navigated || !backendUrl) return;
+      if (canContinue && ollamaDone) {
+        if (!navigateTimer) {
+          navigateTimer = setTimeout(goToApp, 600);
+        }
+      }
     }
 
     function render(s) {
@@ -73,19 +94,28 @@
         pctEl.textContent = '';
       }
       if (s.backend_url) backendUrl = s.backend_url;
-      if (s.can_continue) enterBtn.classList.add('show');
-      if (s.can_continue && s.ollama_done) {
-        setTimeout(goToApp, 600);
+      if (s.can_continue) {
+        canContinue = true;
+        enterBtn.classList.add('show');
       }
+      if (s.ollama_done) ollamaDone = true;
+      maybeNavigate();
     }
 
     enterBtn.addEventListener('click', goToApp);
 
+    function pollStatus() {
+      const t = window.__TAURI__;
+      if (!t || !t.core || navigated) return;
+      t.core.invoke('current_status').then(render).catch(() => {});
+    }
+
     function initTauri() {
       const t = window.__TAURI__;
       if (!t || !t.event || !t.core) { return false; }
-      t.core.invoke('current_status').then(render).catch(() => {});
+      pollStatus();
       t.event.listen('status', (e) => render(e.payload));
+      setInterval(pollStatus, 2000);
       return true;
     }
     if (!initTauri()) {
