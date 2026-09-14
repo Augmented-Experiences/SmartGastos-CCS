@@ -5,6 +5,22 @@ API para empresas, documentos, analítica y exportación.
 import os
 import sys
 import json
+
+
+def _configure_stdio_encoding() -> None:
+    """PyInstaller en Windows usa cp1252; evitar UnicodeEncodeError en print()."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                try:
+                    stream.reconfigure(errors="replace")
+                except (OSError, ValueError):
+                    pass
+
+
+_configure_stdio_encoding()
 import uuid
 import re as _re_mod
 from pathlib import Path
@@ -676,7 +692,7 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
                 detail=f"Tipo de archivo no permitido: {detected_mime}"
             )
 
-        print(f"INFO: Archivo guardado → {file_path} ({total_size:,} bytes)")
+        print(f"INFO: Archivo guardado -> {file_path} ({total_size:,} bytes)")
 
         return {
             "status": "uploaded",

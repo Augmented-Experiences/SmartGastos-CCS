@@ -397,21 +397,22 @@ fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), Str
     let probe = probe_backend(port);
     *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
     ollama_log(&format!(
-        "navigate_main_to_backend probe (no bloquea): ok={} {}",
+        "navigate_main_to_backend probe: ok={} {}",
         probe.ok,
         probe.detail
     ));
-    if probe.ok {
-        let _ = try_mark_backend_ready(app, port);
-    } else {
+    if !probe.ok {
         update_status(app, |s| {
             s.phase = "warning".into();
             s.backend_error = Some(format!(
-                "Diagnostico UI: {}. Puede pulsar Entrar o esperar a que cargue.",
+                "El servidor local no respondio: {}. Revise logs/ollama.log y reconstruya backend.exe.",
                 probe.detail
             ));
         });
+        ollama_log("navigate_main_to_backend: omitido (health/UI probe fallo)");
+        return Err(probe.detail);
     }
+    let _ = try_mark_backend_ready(app, port);
     let url_str = backend_app_url(port);
     navigate_webview_external(app, &url_str)?;
     *app.state::<Navigated>().0.lock().unwrap() = true;
@@ -593,20 +594,25 @@ fn main() {
             ollama_log(&format!("Puerto backend elegido: {}", port));
 
             let data_dir = user_data_dir().to_string_lossy().to_string();
+            if app.state::<BackendState>().0.lock().unwrap().is_some() {
+                ollama_log("WARN: sidecar ya registrado; omitiendo segundo spawn");
+            }
             let sidecar = app.shell().sidecar("backend");
             match sidecar {
                 Ok(cmd) => match cmd
                     .env("PORT", port.to_string())
                     .env("DATA_DIR", data_dir)
                     .env("RUN_BY_TAURI", "1")
+                    .env("PYTHONIOENCODING", "utf-8")
                     .spawn()
                 {
                     Ok((mut rx, child)) => {
-                        app.state::<BackendState>()
-                            .0
-                            .lock()
-                            .unwrap()
-                            .replace(child);
+                        let mut slot = app.state::<BackendState>().0.lock().unwrap();
+                        if slot.is_some() {
+                            ollama_log("WARN: sidecar slot ocupado; matando instancia duplicada");
+                            let _ = slot.take().map(|c| c.kill());
+                        }
+                        slot.replace(child);
                         let sidecar_handle = handle.clone();
                         tauri::async_runtime::spawn(async move {
                             while let Some(event) = rx.recv().await {
@@ -644,8 +650,18 @@ fn main() {
                 if wait_for_health(port, 120) {
                     open_splash_on_backend(&splash_handle, port);
                 } else {
-                    ollama_log("timeout /api/health; intentando splash de todos modos");
-                    open_splash_on_backend(&splash_handle, port);
+                    ollama_log(
+                        "ERROR: /api/health no respondio; sidecar caido (revise traceback en este log)",
+                    );
+                    update_status(&splash_handle, |s| {
+                        s.phase = "warning".into();
+                        s.message = "El servidor local no inicio.".into();
+                        s.backend_error = Some(
+                            "El sidecar (backend.exe) termino antes de escuchar. \
+                             Reconstruya con build-backend.ps1 y revise logs/ollama.log."
+                                .into(),
+                        );
+                    });
                 }
             });
 

@@ -75,14 +75,24 @@
       location.hostname === '127.0.0.1' &&
       (location.pathname === '/__splash' || location.pathname.startsWith('/__splash/'));
 
-    function enterApp() {
+    async function enterApp() {
       if (navigated) return;
-      navigated = true;
-      statusEl.textContent = 'Abriendo la aplicacion...';
       if (onBackendSplash) {
-        window.location.replace('/');
+        try {
+          const hr = await fetch('/api/health', { cache: 'no-store' });
+          if (!hr.ok) throw new Error('/api/health status ' + hr.status);
+          navigated = true;
+          statusEl.textContent = 'Abriendo la aplicacion...';
+          window.location.replace('/');
+        } catch (e) {
+          errorEl.textContent =
+            'El servidor no responde (/api/health). Reconstruya backend.exe (build-backend.ps1) y revise %APPDATA%\\SmartGastos\\logs\\ollama.log';
+          errorEl.style.display = 'block';
+        }
         return;
       }
+      navigated = true;
+      statusEl.textContent = 'Abriendo la aplicacion...';
       const t = window.__TAURI__;
       if (!t || !t.core) return;
       t.core.invoke('navigate_to_backend').catch((e) => {
@@ -111,8 +121,9 @@
         pctEl.textContent = '';
       }
       const done = s.ollamaDone ?? s.ollama_done;
+      const can = s.canContinue ?? s.can_continue;
       if (done) enterBtn.classList.add('show');
-      if (done && !navigated) enterApp();
+      if (done && can && !navigated) enterApp();
     }
 
     enterBtn.addEventListener('click', enterApp);

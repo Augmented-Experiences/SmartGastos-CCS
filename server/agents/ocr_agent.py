@@ -386,10 +386,10 @@ class OCRAgent:
         self._vision_model: Optional[str] = None
         self._vision_model_checked = False
         logger.info(
-            f"OCRAgent inicializado. "
-            f"Tesseract: {'✅' if _tesseract_available() else '❌'} | "
-            f"PIL: {'✅' if _PIL_OK else '❌'} | "
-            f"PyPDF2: {'✅' if _PYPDF2_OK else '❌'}"
+            "OCRAgent inicializado. Tesseract: %s | PIL: %s | PyPDF2: %s",
+            "yes" if _tesseract_available() else "no",
+            "yes" if _PIL_OK else "no",
+            "yes" if _PYPDF2_OK else "no",
         )
 
     def _get_vision_model_cached(self) -> Optional[str]:

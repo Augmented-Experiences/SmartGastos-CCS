@@ -77,8 +77,8 @@ def get_db_session():
 def init_db():
     """Inicializa la base de datos creando todas las tablas."""
     Base.metadata.create_all(bind=engine)
-    logger.info(f"Base de datos inicializada en: {DB_PATH}")
-    print(f"✅ Base de datos inicializada en: {DB_PATH}")
+    logger.info("Base de datos inicializada en: %s", DB_PATH)
+    print(f"OK: Base de datos inicializada en: {DB_PATH}", flush=True)
 
 
 def get_db() -> Session:
