@@ -1,14 +1,15 @@
 {
   "$comment": "Ejemplo de config para SmartGastos (repo pyme-ledger-ai.pinokio). Copiar como desktop/smartsuite.config.json en ese repo. SmartGastos ya respeta la variable DATA_DIR y usa PORT por entorno: no requiere parches.",
+  "publisher": "Cámara de Comercio de Santiago",
   "productName": "SmartGastos",
-  "identifier": "co.org.ccce.smartgastos",
+  "identifier": "cl.ccs.smartgastos",
   "version": "1.0.0",
   "dataDirName": "SmartGastos",
   "accent": "#2E9E3F",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
-  "shortDescription": "Gestión de gastos/contabilidad con IA local (CCCE)",
+  "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
   "splashSubtitle": "Preparando tu asistente de gastos y contabilidad con IA local…",
-  "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE).",
+  "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS).",
   "ollama": {
     "tiers": [
       { "maxRamGb": 6, "model": "llama3.2:1b" },

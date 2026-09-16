@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>SmartGastos — Cámara Colombiana de Comercio Electrónico (CCCE)</title>
+<title>SmartGastos — Cámara de Comercio de Santiago (CCS)</title>
 <script src="vendor/chart.umd.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   DESIGN SYSTEM — SmartGastos (CCCE SmartSuite)
+   DESIGN SYSTEM — SmartGastos (CCS SmartSuite)
 ═══════════════════════════════════════════════════════════════ */
-/* ===== FUENTES CCCE ===== */
+/* ===== FUENTES CCS ===== */
 @font-face {
   font-family: 'DM Sans';
   src: url('fonts/DMSans-Regular.ttf') format('truetype');
@@ -43,16 +43,14 @@
 }
 
 :root {
-  /* === Paleta CCCE (isotipo compartido; acento SmartGastos) === */
-  --ccs-azul-oscuro:   #173A7A;
+  /* === Paleta CCS (isotipo compartido; acento SmartGastos) === */
+  --ccs-azul-oscuro:   #0D3DA6;
   --ccs-verde:         #2E9E3F;
-  --ccs-azul:          #1E56A8;
-  --ccs-celeste:       #2E6FC0;
-  --ccs-verde-brillante: #38C049;
-  --ccce-rojo:         #CE1126;
-  --ccce-dorado:       #F4C10E;
-  --ccce-accent:       #2E9E3F;
-  --ccce-accent-strong:#268833;
+  --ccs-azul:          #0D56CA;
+  --ccs-celeste:       #3A6DDE;
+  --ccs-verde-brillante: #0DD700;
+  --ccs-accent:       #2E9E3F;
+  --ccs-accent-strong:#268833;
 
   /* === Variables de UI (tema claro) === */
   --bg:       #F7F8FA;
@@ -134,7 +132,7 @@ a:hover { text-decoration: underline; }
   transition: width .25s ease;
   box-shadow: var(--shadow-sm);
   border-top: 3px solid transparent;
-  border-image: linear-gradient(90deg, var(--ccs-azul-oscuro) 0 40%, var(--ccce-rojo) 40% 70%, var(--ccce-accent) 70% 100%) 1;
+  border-image: linear-gradient(90deg, var(--ccs-azul-oscuro) 0 40%, var(--ccs-azul) 40% 70%, var(--ccs-accent) 70% 100%) 1;
 }
 .sidebar-logo {
   padding: 16px 14px 14px;
@@ -1318,11 +1316,11 @@ a:hover { text-decoration: underline; }
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <img src="logo-ccce.png" alt="SmartGastos — CCCE" class="sidebar-logo-img" />
+      <img src="logo-ccs.svg" alt="SmartGastos — CCS" class="sidebar-logo-img" />
       <div class="sidebar-logo-divider"></div>
       <div>
         <div class="logo-text">SmartGastos</div>
-        <div class="logo-sub">Gestión de gastos · CCCE</div>
+        <div class="logo-sub">Gestión de gastos · CCS</div>
       </div>
     </div>
     <div class="sidebar-emp" onclick="showSection('admin')">

@@ -1,8 +1,8 @@
 [package]
 name = "smartgastos"
 version = "1.0.0"
-description = "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE)."
-authors = ["Cámara Colombiana de Comercio Electrónico (CCCE)"]
+description = "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS)."
+authors = ["Cámara de Comercio de Santiago"]
 edition = "2021"
 rust-version = "1.77"
 

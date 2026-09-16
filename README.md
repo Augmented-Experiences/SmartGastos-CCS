@@ -1,6 +1,6 @@
 # SmartGastos (Pyme Ledger AI)
 
-> Gestión inteligente de gastos y documentos contables para PyMEs — 100% local, sin internet. Producto **CCCE** (Cámara Colombiana de Comercio Electrónico).
+> Gestión inteligente de gastos y documentos contables para PyMEs — 100% local, sin internet. Producto de la **Cámara de Comercio de Santiago (CCS)**.
 
 ## Descripción
 

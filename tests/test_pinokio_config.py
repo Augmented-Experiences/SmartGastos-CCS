@@ -256,22 +256,25 @@ class TestUIFiles(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "icon.png").exists())
 
     def test_logo_exists(self):
-        """Debe existir isotipo CCCE (logo-ccce) o logo legacy en app/."""
+        """Debe existir el logo CCS o un logo legacy en app/."""
         app_dir = REPO_ROOT / "app"
         has_logo = (
-            (app_dir / "logo-ccce.png").exists()
+            (app_dir / "logo-ccs.svg").exists()
             or (app_dir / "logo.svg").exists()
             or (app_dir / "logo.png").exists()
         )
-        self.assertTrue(has_logo, "Debe existir logo-ccce.png, logo.svg o logo.png en app/")
+        self.assertTrue(has_logo, "Debe existir logo-ccs.svg, logo.svg o logo.png en app/")
 
     def test_desktop_smartsuite_config(self):
         cfg_path = REPO_ROOT / "desktop" / "smartsuite.config.json"
         self.assertTrue(cfg_path.exists(), "Falta desktop/smartsuite.config.json")
         import json
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        self.assertEqual(cfg.get("publisher"), "Cámara de Comercio de Santiago")
         self.assertEqual(cfg.get("productName"), "SmartGastos")
+        self.assertEqual(cfg.get("identifier"), "cl.ccs.smartgastos")
         self.assertEqual(cfg.get("accent"), "#2E9E3F")
+        self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.svg")
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
         self.assertIn("moondream", extra)
 

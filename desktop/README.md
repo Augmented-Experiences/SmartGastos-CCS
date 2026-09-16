@@ -1,6 +1,6 @@
-# SmartSuite Desktop Kit (CCCE) — App/Instalador de escritorio (Tauri)
+# SmartSuite Desktop Kit (CCS) — App/Instalador de escritorio (Tauri)
 
-Kit **reutilizable** para empaquetar las herramientas del SmartSuite de la CCCE (**SmartCaja**, **SmartRedes**, **SmartGastos**, …) como instaladores nativos para **Windows**, **macOS** y **Linux**, sin necesidad de Pinokio. Empaqueta la interfaz web + el backend FastAPI en una app de escritorio con identidad CCCE.
+Kit **reutilizable** para empaquetar las herramientas del SmartSuite de la Cámara de Comercio de Santiago (CCS) (**SmartCaja**, **SmartRedes**, **SmartGastos**, …) como instaladores nativos para **Windows**, **macOS** y **Linux**, sin necesidad de Pinokio. Empaqueta la interfaz web + el backend FastAPI en una app de escritorio con identidad CCS.
 
 Este mismo `desktop/` sirve para las 3 herramientas: solo cambia `smartsuite.config.json` (nombre, id, acento, modelos) — el resto es común. `scripts/configure.mjs` genera los archivos variables antes de compilar.
 
@@ -35,18 +35,18 @@ Todo lo específico de cada app vive en `desktop/smartsuite.config.json`:
 
 | Campo | Uso |
 |---|---|
-| `productName`, `identifier`, `version` | Nombre, id de bundle y versión. |
+| `publisher`, `productName`, `identifier`, `version` | Publicador legal, nombre, id de bundle y versión. |
 | `dataDirName` | Nombre de la carpeta de datos por-usuario. |
-| `accent` | Color de acento CCCE para diferenciar la herramienta (ej. dorado/teal/verde). |
+| `accent` | Color de acento CCS para diferenciar la herramienta. |
 | `window` | Título y tamaño de ventana. |
 | `ollama.tiers` | Modelo (chat/LLM) a descargar según la RAM (`maxRamGb: 0` = sin límite / último). |
 | `ollama.extraModels` | Modelos adicionales a descargar con progreso (p. ej. un modelo de **visión para OCR neuronal** como `moondream`). Se descargan igual que el LLM, con barra de progreso en la pantalla de carga — así capacidades pesadas (OCR) no requieren empaquetar torch/easyocr. |
 
-`scripts/configure.mjs` (se ejecuta solo con `npm run build`/`npm run dev`) genera desde ese config: `src-tauri/tauri.conf.json`, `src-tauri/appconfig.json` (que Rust lee), `src-tauri/Cargo.toml`, `ui/index.html` (splash), `package.json` y los CSS de marca (`ui/ccce-theme.css`, `ui/accent.css`).
+`scripts/configure.mjs` (se ejecuta solo con `npm run build`/`npm run dev`) genera desde ese config: `src-tauri/tauri.conf.json`, `src-tauri/appconfig.json` (que Rust lee), `src-tauri/Cargo.toml`, `ui/index.html` (splash), `package.json` y los CSS de marca (`ui/ccs-theme.css`, `ui/accent.css`).
 
-## Brand kit CCCE (estilo compartido)
+## Brand kit CCS (estilo compartido)
 
-`desktop/brand/` contiene la identidad reutilizable: `ccce-theme.css` (paleta azul marino/dorado/rojo + acentos, con `--ccce-accent` sobreescribible por herramienta) y los logos (`logo-ccce.png`, `logo-ccce-full.png`, `isotipo-ccce.png`). Cualquier UI puede enlazar `ccce-theme.css` y usar las variables `--ccce-*` para verse consistente. Cada herramienta se diferencia con su `accent`.
+`desktop/brand/` contiene `ccs-theme.css`, el tema reutilizable de la identidad CCS. El logo aprobado vive en `app/logo-ccs.svg`; `npm run icon` lo convierte en los iconos del instalador y el splash lo copia como SVG. Cualquier UI puede enlazar `ccs-theme.css` y usar las variables `--ccs-*`. Cada herramienta se diferencia con su `accent`.
 
 ## Requisitos de build
 
@@ -75,7 +75,7 @@ Los instaladores quedan en `desktop/src-tauri/target/release/bundle/` (`.AppImag
 
 Como los repos son separados, se copia el kit a cada uno:
 
-1. Copia a la raíz del repo destino las carpetas `desktop/` y usa su propio `icon.png` (mismo isotipo CCCE) en la raíz.
+1. Copia a la raíz del repo destino las carpetas `desktop/` y usa su propio `icon.png` (mismo logo CCS) en la raíz.
 2. Sustituye `desktop/smartsuite.config.json` por el de la herramienta (hay ejemplos listos en `desktop/examples/smartredes.config.json` y `desktop/examples/smartgastos.config.json`).
 3. **Parche de `server/app.py` (2–3 líneas, retrocompatible con Pinokio):**
    - `BASE_DIR` debe apuntar al bundle cuando la app está empaquetada (para servir `app/` y `defaults/`):
@@ -96,7 +96,7 @@ Como los repos son separados, se copia el kit a cada uno:
 
 El backend se lanza con `PORT` y `DATA_DIR` por entorno, así que sirve para las 3 apps (SmartCaja/SmartRedes usan `--port`/`PORT`; SmartGastos usa `PORT`, default 8000 — irrelevante porque el kit fija el puerto).
 
-Para aplicar además el **estilo CCCE a la UI** de cada herramienta (colores/logos como en SmartCaja), enlaza `brand/ccce-theme.css` en su `app/index.html` y reemplaza su paleta por las variables `--ccce-*` (con su `accent`).
+Para aplicar además el **estilo CCS a la UI** de cada herramienta (colores/logos como en SmartCaja), enlaza `brand/ccs-theme.css` en su `app/index.html` y reemplaza su paleta por las variables `--ccs-*` (con su `accent`).
 
 ## Build multiplataforma (recomendado)
 

@@ -1,7 +1,9 @@
 {
   "identifier": "default",
   "description": "Permisos base para la ventana principal de SmartGastos.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:webview:default",

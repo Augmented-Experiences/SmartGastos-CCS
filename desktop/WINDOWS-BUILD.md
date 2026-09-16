@@ -1,6 +1,6 @@
-# Generar los instaladores de Windows localmente (SmartSuite CCCE)
+# Generar los instaladores de Windows localmente (SmartSuite CCS)
 
-Guía paso a paso para compilar en **Windows** el instalador `.msi`/`.exe` de cada herramienta (SmartCaja, SmartRedes, SmartGastos) con el kit Tauri. "Nuestro propio Pinokio": un instalador nativo por app, con marca CCCE y descarga de modelos (LLM + visión/OCR) con progreso en el arranque.
+Guía paso a paso para compilar en **Windows** el instalador `.msi`/`.exe` de cada herramienta (SmartCaja, SmartRedes, SmartGastos) con el kit Tauri. "Nuestro propio Pinokio": un instalador nativo por app, con marca CCS y descarga de modelos (LLM + visión/OCR) con progreso en el arranque.
 
 ---
 
@@ -37,7 +37,7 @@ winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 ## 1) SmartCaja
 
 ```powershell
-git clone -b cursor/rebrand-smartcaja-ccce-2bcd https://github.com/Augmented-Experiences/ccs-cashflow-assistant.git SmartCaja
+git clone https://github.com/Augmented-Experiences/ccs-cashflow-assistant.git SmartCaja
 cd SmartCaja
 py -3.12 -m venv venv
 powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1
@@ -53,7 +53,7 @@ npm run build
 ```powershell
 git clone https://github.com/Augmented-Experiences/ccs-brand-assistant.git SmartRedes
 cd SmartRedes
-# Aplica todos los cambios (UI CCCE + kit desktop + parche app.py + requirements-desktop):
+# Aplica todos los cambios (UI CCS + kit desktop + parche app.py + requirements-desktop):
 git apply smartredes_full.patch        # el .patch está en los artefactos del agente
 py -3.12 -m venv venv
 powershell -ExecutionPolicy Bypass -File desktop\scripts\build-backend.ps1
@@ -82,10 +82,10 @@ Si prefieres dos pasos: ejecuta `build-backend.ps1` sin `-Installer`, luego `cd 
 Si prefieres no usar el `.patch`, en cada repo (SmartRedes/SmartGastos):
 1. Copia la carpeta `desktop/` del kit (del repo SmartCaja) a la raíz del repo.
 2. Copia `desktop/examples/<tool>.config.json` como `desktop/smartsuite.config.json`.
-3. Reemplaza `icon.png` de la raíz por el isotipo CCCE.
+3. Reemplaza `icon.png` de la raíz por el logo CCS.
 4. Aplica el parche de `server/app.py` (`smartredes_app_py.patch` / `smartgastos_app_py.patch`): `BASE_DIR` frozen-aware, `DATA_DIR` por env, y `import sys`.
 5. Crea `requirements-desktop.txt` (subconjunto liviano sin torch/easyocr/diffusers).
-6. Aplica el brand kit a la UI (`app/index.html`): variables `--ccce-*`, logo `logo-ccce.png`, nombre de la herramienta.
+6. Aplica el brand kit a la UI (`app/index.html`): variables `--ccs-*`, logo `logo-ccs.svg`, nombre de la herramienta.
 
 ---
 

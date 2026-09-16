@@ -7,7 +7,7 @@
 //   - src-tauri/Cargo.toml (name/description/bin)
 //   - src-tauri/capabilities/default.json
 //   - package.json (npm name/description)
-//   - ui/index.html (splash), ui/ccce-theme.css, ui/accent.css
+//   - ui/index.html (splash), ui/ccs-theme.css, ui/accent.css
 //
 // Se ejecuta automáticamente antes de 'npm run build' / 'npm run dev'.
 // ============================================================
@@ -26,13 +26,14 @@ function req(name) {
   return cfg[name];
 }
 
+const publisher = req("publisher");
 const productName = req("productName");
 const version = cfg.version || "1.0.0";
 const identifier = req("identifier");
 const dataDirName = req("dataDirName");
-const accent = cfg.accent || "#F4C10E";
+const accent = cfg.accent || "#2E9E3F";
 
-/** Identificador Rust/npm estable (co.org.ccce.smartgastos → smartgastos). */
+/** Identificador Rust/npm estable (cl.ccs.smartgastos → smartgastos). */
 function cargoPackageName() {
   if (cfg.cargoPackageName) return String(cfg.cargoPackageName).toLowerCase();
   const last = identifier.split(".").pop() || "smartapp";
@@ -200,7 +201,7 @@ const cargoToml = `[package]
 name = "${pkg}"
 version = "${version}"
 description = "${cargoDescription.replace(/"/g, '\\"')}"
-authors = ["Cámara Colombiana de Comercio Electrónico (CCCE)"]
+authors = ["${publisher.replace(/"/g, '\\"')}"]
 edition = "2021"
 rust-version = "1.77"
 
@@ -260,33 +261,36 @@ const pkgJsonPath = resolve(DESKTOP, "package.json");
 const pkgJson = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
 pkgJson.name = `${pkg}-desktop`;
 pkgJson.version = version;
-pkgJson.description = `Instalador/app de escritorio nativo de ${productName} (Tauri) — CCCE`;
+pkgJson.description = `Instalador/app de escritorio nativo de ${productName} (Tauri) — ${publisher}`;
 writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + "\n");
 
 // --- 6) Splash UI ---
 mkdirSync(resolve(DESKTOP, "ui"), { recursive: true });
-copyFileSync(resolve(DESKTOP, "brand/ccce-theme.css"), resolve(DESKTOP, "ui/ccce-theme.css"));
+copyFileSync(resolve(DESKTOP, "brand/ccs-theme.css"), resolve(DESKTOP, "ui/ccs-theme.css"));
 writeFileSync(
   resolve(DESKTOP, "ui/accent.css"),
-  `/* Generado por configure.mjs — acento por-herramienta */\n:root { --ccce-accent: ${accent}; }\n`
+  `/* Generado por configure.mjs — acento por-herramienta */\n:root { --ccs-accent: ${accent}; }\n`
 );
 
 let logoHtml = "";
-const logoRel = cfg.splashLogo || "../icon.png";
+const logoRel = cfg.splashLogo || "../app/logo-ccs.svg";
 const logoCandidates = [
   resolve(DESKTOP, logoRel),
+  resolve(DESKTOP, "..", "app", "logo-ccs.svg"),
   resolve(DESKTOP, "..", "icon.png"),
-  resolve(DESKTOP, "brand", "isotipo-ccce.png"),
 ];
 const logoSrc = logoCandidates.find((p) => existsSync(p));
 if (logoSrc) {
-  copyFileSync(logoSrc, resolve(DESKTOP, "ui/splash-logo.png"));
-  logoHtml = `<img class="splash-logo" src="splash-logo.png" alt="${escapeHtml(productName)}" />\n  `;
+  const logoExtension = logoSrc.slice(logoSrc.lastIndexOf(".")) || ".png";
+  const splashLogoFile = `splash-logo${logoExtension}`;
+  copyFileSync(logoSrc, resolve(DESKTOP, "ui", splashLogoFile));
+  logoHtml = `<img class="splash-logo" src="${splashLogoFile}" alt="${escapeHtml(productName)}" />\n  `;
 }
 
 const splashTpl = readFileSync(resolve(DESKTOP, "ui/splash.template.html"), "utf8");
 const splashHtml = splashTpl
   .replaceAll("{{PRODUCT_NAME}}", escapeHtml(productName))
+  .replaceAll("{{PUBLISHER}}", escapeHtml(publisher))
   .replaceAll("{{BRAND_HTML}}", brandHtml(productName))
   .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle))
   .replaceAll("{{LOGO_HTML}}", logoHtml);

@@ -1,0 +1,74 @@
+/* ============================================================
+ * CCS Brand Kit — tema compartido para el SmartSuite
+ * (SmartCaja, SmartRedes, SmartGastos, …)
+ *
+ * Identidad de la Cámara de Comercio de Santiago (CCS).
+ * Uso: enlazar en el <head> de la app y usar las variables --ccs-*.
+ * ============================================================ */
+
+:root {
+  /* Paleta CCS existente; cada herramienta puede sobrescribir el acento. */
+  --ccs-azul-oscuro: #0D3DA6;
+  --ccs-azul:        #0D56CA;
+  --ccs-celeste:     #3A6DDE;
+  --ccs-verde:       #3DAE2B;
+  --ccs-verde-brillante: #0DD700;
+  --ccs-accent:      #2E9E3F;
+  --ccs-accent-strong: #268833;
+
+  /* Neutros / superficies */
+  --bg-base:   #F7F8FA;
+  --bg-card:   #FFFFFF;
+  --bg-hover:  #EEF2F8;
+  --text-main: #1A2340;
+  --text-muted:#6B7A99;
+  --border:    #D6DFF0;
+
+  /* Semánticos */
+  --primary:   var(--ccs-azul-oscuro);
+  --primary-h: var(--ccs-azul);
+  --success:   var(--ccs-verde);
+  --warning:   #f59e0b;
+  --danger:    #dc2626;
+
+  --radius: 10px;
+  --shadow-sm: 0 1px 3px rgba(13,61,166,0.08);
+  --shadow-md: 0 4px 12px rgba(13,61,166,0.10);
+}
+
+/* Barra de marca para topbar o bajo el logo. */
+.ccs-accent-top {
+  border-top: 3px solid transparent;
+  border-image: linear-gradient(90deg,
+      var(--ccs-azul-oscuro) 0 50%,
+      var(--ccs-azul) 50% 75%,
+      var(--ccs-accent) 75% 100%) 1;
+}
+.ccs-accent-bottom {
+  border-bottom: 3px solid transparent;
+  border-image: linear-gradient(90deg,
+      var(--ccs-azul-oscuro) 0 50%,
+      var(--ccs-azul) 50% 75%,
+      var(--ccs-accent) 75% 100%) 1;
+}
+
+/* Botón primario de acento con texto azul marino. */
+.ccs-btn-primary {
+  background: linear-gradient(135deg, var(--ccs-accent), var(--ccs-accent-strong));
+  color: var(--ccs-azul-oscuro);
+  border: 0;
+  border-bottom: 2px solid var(--ccs-azul-oscuro);
+  border-radius: var(--radius);
+  font-weight: 700;
+  cursor: pointer;
+}
+.ccs-btn-primary:hover { filter: brightness(1.05); transform: translateY(-1px); }
+
+/* Subrayado de marca para títulos hero. */
+.ccs-underline::after {
+  content: "";
+  display: block;
+  width: 64px; height: 4px; margin: 10px auto 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--ccs-azul-oscuro), var(--ccs-azul), var(--ccs-accent));
+}

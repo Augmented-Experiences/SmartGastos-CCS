@@ -1,15 +1,16 @@
 {
   "$comment": "SmartGastos (pyme-ledger-ai.pinokio). Edita aquí y ejecuta node scripts/configure.mjs o npm run build.",
+  "publisher": "Cámara de Comercio de Santiago",
   "productName": "SmartGastos",
-  "identifier": "co.org.ccce.smartgastos",
+  "identifier": "cl.ccs.smartgastos",
   "version": "1.0.0",
   "dataDirName": "SmartGastos",
   "accent": "#2E9E3F",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
-  "shortDescription": "Gestión de gastos/contabilidad con IA local (CCCE)",
-  "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara Colombiana de Comercio Electrónico (CCCE).",
+  "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
+  "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS).",
   "splashSubtitle": "Preparando tu asistente de gastos y contabilidad con IA local...",
-  "splashLogo": "../icon.png",
+  "splashLogo": "../app/logo-ccs.svg",
   "ollama": {
     "tiers": [
       { "maxRamGb": 6, "model": "llama3.2:1b" },

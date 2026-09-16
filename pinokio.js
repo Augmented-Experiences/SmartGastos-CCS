@@ -1,6 +1,6 @@
 module.exports = {
-  title: "SmartGastos — CCCE",
-  description: "Gestión de gastos y contabilidad con IA local para PyMEs — 100% offline | CCCE",
+  title: "SmartGastos — Cámara de Comercio de Santiago",
+  description: "Gestión de gastos y contabilidad con IA local para PyMEs — 100% offline | Cámara de Comercio de Santiago",
   icon: "icon.png",
   version: "1.5.0",
 
