@@ -7,7 +7,11 @@
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
+<<<<<<< ours
 use std::process::Child;
+=======
+use std::process::{Child, Command, Stdio};
+>>>>>>> theirs
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -210,6 +214,7 @@ fn kill_ollama_child(state: &OllamaState) {
         slot.take()
     };
     if let Some(mut child) = child {
+<<<<<<< ours
         let pid = child.id();
         ollama_log(&format!(
             "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
@@ -218,6 +223,16 @@ fn kill_ollama_child(state: &OllamaState) {
         ollama::kill_owned_child(&mut child);
         ollama::clear_owned_pid(&user_data_dir());
         ollama_log("kill_ollama_child: OK");
+=======
+        ollama_log("kill_ollama_child: terminando Ollama iniciado por esta app");
+        match child.kill() {
+            Ok(()) => {
+                let _ = child.wait();
+                ollama_log("kill_ollama_child: OK");
+            }
+            Err(e) => ollama_log(&format!("kill_ollama_child: {}", e)),
+        }
+>>>>>>> theirs
     }
 }
 
@@ -520,10 +535,31 @@ fn bootstrap_ollama(
 ) {
     std::thread::spawn(move || {
         if shutdown_requested(&app) {
+<<<<<<< ours
+=======
+            return;
+        }
+        update_status(&app, |s| {
+            s.phase = "ollama".into();
+            s.message = "Verificando el motor de IA (Ollama)...".into();
+            s.percent = -1;
+        });
+
+        let installed = ollama_command()
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !installed {
+            finish_ollama_bootstrap(&app, backend_port);
+>>>>>>> theirs
             return;
         }
         status_progress(&app, "ollama", -1, "Verificando el motor de IA (Ollama)...");
 
+<<<<<<< ours
         let data_dir = user_data_dir();
         if already_healthy {
             ollama_log(&format!(
@@ -593,10 +629,34 @@ fn bootstrap_ollama(
                         -1,
                         "No se pudo descargar Ollama. La app continuara sin IA.",
                     );
+=======
+        if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
+            let mut cmd = ollama_command();
+            cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    let ollama_state = app.state::<OllamaState>();
+                    let mut slot = ollama_state.0.lock().unwrap();
+                    if shutdown_requested(&app) {
+                        drop(slot);
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                    if let Some(mut previous) = slot.replace(child) {
+                        let _ = previous.kill();
+                        let _ = previous.wait();
+                    }
+                    ollama_log("Ollama iniciado por esta instancia");
+                }
+                Err(e) => {
+                    ollama_log(&format!("No se pudo iniciar Ollama: {}", e));
+>>>>>>> theirs
                     finish_ollama_bootstrap(&app, backend_port);
                     return;
                 }
             }
+<<<<<<< ours
         }
 
         if shutdown_requested(&app) {
@@ -606,8 +666,14 @@ fn bootstrap_ollama(
             ollama_log("API de Ollama no saludable; se omite pull");
             finish_ollama_bootstrap(&app, backend_port);
             return;
+=======
+            wait_for_port(11434, 30);
+>>>>>>> theirs
         }
 
+        if shutdown_requested(&app) {
+            return;
+        }
         let model = model_for_ram();
         let _ = pull_model_with_progress(&app, ollama_port, &model);
 

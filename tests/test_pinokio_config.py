@@ -315,6 +315,7 @@ class TestUIFiles(unittest.TestCase):
         setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
         self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
 
+<<<<<<< ours
 
 class TestPortableOllama(unittest.TestCase):
     """La app de escritorio descarga Ollama portable; no usa MSI ni torch/OCR extra."""
@@ -381,6 +382,8 @@ class TestPortableOllama(unittest.TestCase):
         self.assertNotIn("easyocr", joined)
         self.assertNotIn("torch", joined)
 
+=======
+>>>>>>> theirs
 
 if __name__ == '__main__':
     unittest.main()
