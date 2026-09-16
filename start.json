@@ -4,7 +4,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>Iniciando Pyme Ledger AI...</h3><p style='color:#64748b'>Verificando motor de IA y servidor...</p></div>"
+        "html": "<div style='padding:16px;background:linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);border:1px solid #3A89DA;border-radius:8px'><h3 style='color:#002558'>Iniciando SmartGastos...</h3><p style='color:#002558'>Verificando motor de IA y servidor...</p></div>"
       }
     },
     {

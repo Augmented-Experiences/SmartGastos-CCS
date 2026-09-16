@@ -5,7 +5,7 @@
   "identifier": "cl.ccs.smartgastos",
   "version": "1.0.0",
   "dataDirName": "SmartGastos",
-  "accent": "#2E9E3F",
+  "accent": "#00D53A",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
   "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
   "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS).",

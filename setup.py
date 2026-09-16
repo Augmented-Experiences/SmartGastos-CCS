@@ -92,9 +92,13 @@ def install_python_deps():
     está bloqueado por el sistema operativo. Usar `python -m pip` evita este
     problema completamente.
     """
-    req_file = BASE_DIR / "requirements.txt"
+    # El launcher instala el mismo subconjunto liviano que el sidecar Tauri:
+    # no incluye EasyOCR ni Torch; el OCR visual usa Ollama/moondream.
+    req_file = BASE_DIR / "requirements-desktop.txt"
     if not req_file.exists():
-        raise RuntimeError(f"requirements.txt no encontrado en {req_file}")
+        req_file = BASE_DIR / "requirements.txt"
+    if not req_file.exists():
+        raise RuntimeError(f"Archivo de dependencias no encontrado en {req_file}")
 
     # Paso 1: Actualizar pip usando python -m pip (NUNCA pip.exe directo)
     log("Actualizando pip ...")
@@ -105,8 +109,8 @@ def install_python_deps():
         "--quiet"
     ], check=False)  # No fallar si pip ya está actualizado
 
-    # Paso 2: Instalar requirements.txt
-    log("Instalando requirements.txt ...")
+    # Paso 2: Instalar el subconjunto de dependencias del instalador.
+    log(f"Instalando {req_file.name} ...")
     run([
         str(VENV_PYTHON), "-m", "pip", "install",
         "-r", str(req_file),

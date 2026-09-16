@@ -3,14 +3,14 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:20px;background:#f0f4ff;border-radius:12px;margin:16px;border:1px solid #0D3DA6'><h2 style='color:#0D3DA6;margin-bottom:8px'>CCS — Pyme Ledger AI</h2><p style='color:#475569'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#64748b;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
+        "html": "<div style='padding:20px;background:linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);border-radius:12px;margin:16px;border:1px solid #3A89DA'><h2 style='color:#002558;margin-bottom:8px'>CCS — SmartGastos</h2><p style='color:#002558'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#002558;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
       }
     },
 
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>1/4 — Verificando motor de IA (Ollama)...</h3><p style='color:#64748b'>Motor de IA local para ejecutar modelos 100% offline.</p></div>"
+        "html": "<div style='padding:16px'><h3 style='color:#002558'>1/4 — Verificando motor de IA (Ollama)...</h3><p style='color:#64748b'>Motor de IA local para ejecutar modelos 100% offline.</p></div>"
       }
     },
 
@@ -25,7 +25,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>2/4 — Configurando entorno Python y dependencias...</h3><p style='color:#64748b'>Creando entorno virtual e instalando librerías (OCR, PDF, servidor web).</p></div>"
+        "html": "<div style='padding:16px'><h3 style='color:#002558'>2/4 — Configurando entorno Python y dependencias...</h3><p style='color:#64748b'>Creando entorno virtual e instalando librerías (OCR, PDF, servidor web).</p></div>"
       }
     },
 
@@ -40,7 +40,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>3/4 — Descargando modelos de IA...</h3><p style='color:#64748b'>Agente de lenguaje (~500MB) y agente visual (~1.8GB). Solo se descarga una vez.</p></div>"
+        "html": "<div style='padding:16px'><h3 style='color:#002558'>3/4 — Descargando modelos de IA...</h3><p style='color:#64748b'>Agente de lenguaje (~500MB) y agente visual (~1.8GB). Solo se descarga una vez.</p></div>"
       }
     },
 
@@ -55,7 +55,7 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>4/4 — Guardando configuración...</h3></div>"
+        "html": "<div style='padding:16px'><h3 style='color:#002558'>4/4 — Guardando configuración...</h3></div>"
       }
     },
 
@@ -70,14 +70,14 @@
     {
       "method": "log",
       "params": {
-        "html": "<div style='padding:20px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>Pyme Ledger AI está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
+        "html": "<div style='padding:20px;background:#e7f9ed;border-radius:8px;margin:16px;border:1px solid #00D53A'><h3 style='color:#00D53A;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>SmartGastos está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
       }
     },
 
     {
       "method": "notify",
       "params": {
-        "html": "CCS Pyme Ledger AI instalado. Haz click en Iniciar para comenzar."
+        "html": "CCS SmartGastos instalado. Haz click en Iniciar para comenzar."
       }
     }
   ]

@@ -18,7 +18,7 @@
     html, body { height: 100%; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: radial-gradient(circle at 50% 30%, #1e4a94 0%, #0f2a5a 100%);
+      background: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
       color: #fff; display: flex; flex-direction: column; align-items: center;
       justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
     }
@@ -27,14 +27,14 @@
     .brand .accent { color: var(--accent); }
     .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
     .track { width: 300px; max-width: 80vw; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.15); position: relative; }
-    .fill { height: 100%; width: 0%; border-radius: 8px; background: linear-gradient(90deg, var(--navy), var(--mid), var(--accent)); transition: width 0.4s ease; }
+    .fill { height: 100%; width: 0%; border-radius: 8px; background: var(--ccs-gradient); transition: width 0.4s ease; }
     .track.indeterminate .fill { width: 40% !important; position: absolute; left: -40%; animation: slide 1.2s infinite ease-in-out; }
     @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
     .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
     .pct { color: var(--accent); font-weight: 700; font-size: 13px; min-height: 16px; }
     .enter {
       margin-top: 12px; padding: 14px 32px; border-radius: 12px; border: 0; cursor: pointer;
-      background: linear-gradient(135deg, var(--accent), var(--ccs-accent-strong)); color: var(--navy);
+      background: var(--ccs-gradient); color: var(--navy);
       font-weight: 800; font-size: 18px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
       box-shadow: 0 4px 20px rgba(0,0,0,0.35);
     }
@@ -143,7 +143,7 @@
 
     if (onBackendSplash) {
       pollHttpStatus();
-      setInterval(pollHttpStatus, 1000);
+      setInterval(pollHttpStatus, 400);
     } else {
       function initTauri() {
         const t = window.__TAURI__;

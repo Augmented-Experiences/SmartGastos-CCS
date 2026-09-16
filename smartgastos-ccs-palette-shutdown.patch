@@ -1,0 +1,712 @@
+From a0a7f9470b7975fdde23751ec6eab3bb629e2562 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Wed, 16 Sep 2026 20:45:53 +0000
+Subject: [PATCH] feat: apply CCS palette and hard shutdown
+
+---
+ app/index.html                           |  29 ++---
+ desktop/brand/ccs-theme.css              |  21 ++--
+ desktop/examples/smartgastos.config.json |   2 +-
+ desktop/scripts/configure.mjs            |   2 +-
+ desktop/smartsuite.config.json           |   2 +-
+ desktop/src-tauri/Cargo.lock             |   2 +-
+ desktop/src-tauri/src/main.rs            | 136 ++++++++++++++++-------
+ desktop/ui/accent.css                    |   2 +-
+ desktop/ui/ccs-theme.css                 |  21 ++--
+ desktop/ui/index.html                    |   6 +-
+ desktop/ui/splash.template.html          |   6 +-
+ install.json                             |  14 +--
+ setup.py                                 |  12 +-
+ start.json                               |   2 +-
+ stop.json                                |   4 +-
+ tests/test_pinokio_config.py             |  29 ++++-
+ 16 files changed, 192 insertions(+), 98 deletions(-)
+
+diff --git a/app/index.html b/app/index.html
+index 25e6da7..9aa414e 100644
+--- a/app/index.html
++++ b/app/index.html
+@@ -43,14 +43,15 @@
+ }
+ 
+ :root {
+-  /* === Paleta CCS (isotipo compartido; acento SmartGastos) === */
+-  --ccs-azul-oscuro:   #0D3DA6;
+-  --ccs-verde:         #2E9E3F;
+-  --ccs-azul:          #0D56CA;
+-  --ccs-celeste:       #3A6DDE;
+-  --ccs-verde-brillante: #0DD700;
+-  --ccs-accent:       #2E9E3F;
+-  --ccs-accent-strong:#268833;
++  /* === Paleta CCS aprobada === */
++  --ccs-azul-oscuro:   #002558;
++  --ccs-verde:         #00D53A;
++  --ccs-azul:          #0056CA;
++  --ccs-celeste:       #3A89DA;
++  --ccs-verde-brillante: #00D700;
++  --ccs-accent:       #00D53A;
++  --ccs-accent-strong:#00D53A;
++  --ccs-gradient: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+ 
+   /* === Variables de UI (tema claro) === */
+   --bg:       #F7F8FA;
+@@ -62,13 +63,13 @@
+   --border2:  #B8C8E4;
+   --border3:  #9BB0D4;
+ 
+-  --accent:   #2E9E3F;
+-  --accent2:  #268833;
+-  --accent3:  #38C049;
+-  --accent-glow: rgba(46,158,63,.18);
++  --accent:   #00D53A;
++  --accent2:  #00D700;
++  --accent3:  #3A89DA;
++  --accent-glow: rgba(0,213,58,.18);
+ 
+-  --green:    #3DAE2B;
+-  --green2:   #2D8A1E;
++  --green:    #00D53A;
++  --green2:   #00B832;
+   --yellow:   #f59e0b;
+   --red:      #dc2626;
+   --purple:   #7c3aed;
+diff --git a/desktop/brand/ccs-theme.css b/desktop/brand/ccs-theme.css
+index ba1718a..f68613a 100644
+--- a/desktop/brand/ccs-theme.css
++++ b/desktop/brand/ccs-theme.css
+@@ -7,14 +7,15 @@
+  * ============================================================ */
+ 
+ :root {
+-  /* Paleta CCS existente; cada herramienta puede sobrescribir el acento. */
+-  --ccs-azul-oscuro: #0D3DA6;
+-  --ccs-azul:        #0D56CA;
+-  --ccs-celeste:     #3A6DDE;
+-  --ccs-verde:       #3DAE2B;
+-  --ccs-verde-brillante: #0DD700;
+-  --ccs-accent:      #2E9E3F;
+-  --ccs-accent-strong: #268833;
++  /* Paleta CCS aprobada para splash, tema e instalador. */
++  --ccs-azul-oscuro: #002558;
++  --ccs-azul:        #0056CA;
++  --ccs-celeste:     #3A89DA;
++  --ccs-verde:       #00D53A;
++  --ccs-verde-brillante: #00D700;
++  --ccs-accent:      #00D53A;
++  --ccs-accent-strong: #00D53A;
++  --ccs-gradient: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+ 
+   /* Neutros / superficies */
+   --bg-base:   #F7F8FA;
+@@ -54,7 +55,7 @@
+ 
+ /* Botón primario de acento con texto azul marino. */
+ .ccs-btn-primary {
+-  background: linear-gradient(135deg, var(--ccs-accent), var(--ccs-accent-strong));
++  background: var(--ccs-gradient);
+   color: var(--ccs-azul-oscuro);
+   border: 0;
+   border-bottom: 2px solid var(--ccs-azul-oscuro);
+@@ -70,5 +71,5 @@
+   display: block;
+   width: 64px; height: 4px; margin: 10px auto 0;
+   border-radius: 4px;
+-  background: linear-gradient(90deg, var(--ccs-azul-oscuro), var(--ccs-azul), var(--ccs-accent));
++  background: var(--ccs-gradient);
+ }
+diff --git a/desktop/examples/smartgastos.config.json b/desktop/examples/smartgastos.config.json
+index 3536151..c2b0507 100644
+--- a/desktop/examples/smartgastos.config.json
++++ b/desktop/examples/smartgastos.config.json
+@@ -5,7 +5,7 @@
+   "identifier": "cl.ccs.smartgastos",
+   "version": "1.0.0",
+   "dataDirName": "SmartGastos",
+-  "accent": "#2E9E3F",
++  "accent": "#00D53A",
+   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
+   "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
+   "splashSubtitle": "Preparando tu asistente de gastos y contabilidad con IA local…",
+diff --git a/desktop/scripts/configure.mjs b/desktop/scripts/configure.mjs
+index d7d2420..82e1bae 100644
+--- a/desktop/scripts/configure.mjs
++++ b/desktop/scripts/configure.mjs
+@@ -31,7 +31,7 @@ const productName = req("productName");
+ const version = cfg.version || "1.0.0";
+ const identifier = req("identifier");
+ const dataDirName = req("dataDirName");
+-const accent = cfg.accent || "#2E9E3F";
++const accent = cfg.accent || "#00D53A";
+ 
+ /** Identificador Rust/npm estable (cl.ccs.smartgastos → smartgastos). */
+ function cargoPackageName() {
+diff --git a/desktop/smartsuite.config.json b/desktop/smartsuite.config.json
+index 8679a8f..7377793 100644
+--- a/desktop/smartsuite.config.json
++++ b/desktop/smartsuite.config.json
+@@ -5,7 +5,7 @@
+   "identifier": "cl.ccs.smartgastos",
+   "version": "1.0.0",
+   "dataDirName": "SmartGastos",
+-  "accent": "#2E9E3F",
++  "accent": "#00D53A",
+   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
+   "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
+   "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS).",
+diff --git a/desktop/src-tauri/Cargo.lock b/desktop/src-tauri/Cargo.lock
+index b01566b..2a3d0db 100644
+--- a/desktop/src-tauri/Cargo.lock
++++ b/desktop/src-tauri/Cargo.lock
+@@ -3031,7 +3031,7 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
+ 
+ [[package]]
+ name = "smartgastos"
+-version = "2.0.0"
++version = "1.0.0"
+ dependencies = [
+  "serde",
+  "serde_json",
+diff --git a/desktop/src-tauri/src/main.rs b/desktop/src-tauri/src/main.rs
+index c3b4e5a..13260f5 100644
+--- a/desktop/src-tauri/src/main.rs
++++ b/desktop/src-tauri/src/main.rs
+@@ -1,10 +1,14 @@
+ // App de escritorio nativa SmartSuite (Tauri v2)
+-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
++#![cfg_attr(
++    all(not(debug_assertions), target_os = "windows"),
++    windows_subsystem = "windows"
++)]
+ 
+ use std::io::{BufRead, Write};
+ use std::net::{TcpListener, TcpStream};
+ use std::path::PathBuf;
+-use std::process::{Command, Stdio};
++use std::process::{Child, Command, Stdio};
++use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Mutex, OnceLock};
+ use std::time::Duration;
+ 
+@@ -43,6 +47,9 @@ fn app_config() -> &'static AppConfig {
+ }
+ 
+ struct BackendState(Mutex<Option<CommandChild>>);
++/// Solo contiene el proceso `ollama serve` lanzado por esta instancia.
++struct OllamaState(Mutex<Option<Child>>);
++struct ShutdownState(AtomicBool);
+ struct Navigated(Mutex<bool>);
+ struct LastProbe(Mutex<String>);
+ 
+@@ -193,7 +200,11 @@ fn backend_log(line: &str) {
+ }
+ 
+ fn kill_backend_child(state: &BackendState) {
+-    if let Some(child) = state.0.lock().unwrap().take() {
++    let child = {
++        let mut slot = state.0.lock().unwrap();
++        slot.take()
++    };
++    if let Some(child) = child {
+         ollama_log("kill_backend_child: terminando sidecar backend");
+         match child.kill() {
+             Ok(()) => ollama_log("kill_backend_child: OK"),
+@@ -202,9 +213,37 @@ fn kill_backend_child(state: &BackendState) {
+     }
+ }
+ 
++fn kill_ollama_child(state: &OllamaState) {
++    let child = {
++        let mut slot = state.0.lock().unwrap();
++        slot.take()
++    };
++    if let Some(mut child) = child {
++        ollama_log("kill_ollama_child: terminando Ollama iniciado por esta app");
++        match child.kill() {
++            Ok(()) => {
++                let _ = child.wait();
++                ollama_log("kill_ollama_child: OK");
++            }
++            Err(e) => ollama_log(&format!("kill_ollama_child: {}", e)),
++        }
++    }
++}
++
++fn shutdown_requested(app: &tauri::AppHandle) -> bool {
++    app.state::<ShutdownState>().0.load(Ordering::Acquire)
++}
++
+ fn shutdown_app(app: &tauri::AppHandle, reason: &str) {
++    if app.state::<ShutdownState>().0.swap(true, Ordering::AcqRel) {
++        return;
++    }
+     ollama_log(&format!("shutdown_app: {}", reason));
+-    kill_backend_child(&*app.state::<BackendState>());
++    // Bind the state before acquiring its Mutex to avoid a temporary State borrow.
++    let backend_state = app.state::<BackendState>();
++    kill_backend_child(&backend_state);
++    let ollama_state = app.state::<OllamaState>();
++    kill_ollama_child(&ollama_state);
+ }
+ 
+ fn pick_port() -> u16 {
+@@ -314,10 +353,12 @@ fn probe_backend(port: u16) -> ProbeResult {
+         if r.status() == 200 {
+             if let Ok(body) = r.into_string() {
+                 ollama_log(&format!("/api/desktop-ui: {}", body));
+-                if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false") {
++                if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false")
++                {
+                     return ProbeResult {
+                         ok: false,
+-                        detail: "sidecar sin app/index.html empaquetado (rebuild PyInstaller)".into(),
++                        detail: "sidecar sin app/index.html empaquetado (rebuild PyInstaller)"
++                            .into(),
+                     };
+                 }
+             }
+@@ -337,11 +378,7 @@ fn probe_backend(port: u16) -> ProbeResult {
+             } else {
+                 ProbeResult {
+                     ok: false,
+-                    detail: format!(
+-                        "GET / status {} (no HTML). head={:?}",
+-                        status,
+-                        snippet
+-                    ),
++                    detail: format!("GET / status {} (no HTML). head={:?}", status, snippet),
+                 }
+             }
+         }
+@@ -398,8 +435,7 @@ fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), Str
+     *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
+     ollama_log(&format!(
+         "navigate_main_to_backend probe: ok={} {}",
+-        probe.ok,
+-        probe.detail
++        probe.ok, probe.detail
+     ));
+     if !probe.ok {
+         update_status(app, |s| {
+@@ -513,6 +549,9 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
+ 
+ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
+     std::thread::spawn(move || {
++        if shutdown_requested(&app) {
++            return;
++        }
+         update_status(&app, |s| {
+             s.phase = "ollama".into();
+             s.message = "Verificando el motor de IA (Ollama)...".into();
+@@ -534,10 +573,34 @@ fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
+         if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
+             let mut cmd = ollama_command();
+             cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
+-            let _ = cmd.spawn();
++            match cmd.spawn() {
++                Ok(mut child) => {
++                    let ollama_state = app.state::<OllamaState>();
++                    let mut slot = ollama_state.0.lock().unwrap();
++                    if shutdown_requested(&app) {
++                        drop(slot);
++                        let _ = child.kill();
++                        let _ = child.wait();
++                        return;
++                    }
++                    if let Some(mut previous) = slot.replace(child) {
++                        let _ = previous.kill();
++                        let _ = previous.wait();
++                    }
++                    ollama_log("Ollama iniciado por esta instancia");
++                }
++                Err(e) => {
++                    ollama_log(&format!("No se pudo iniciar Ollama: {}", e));
++                    finish_ollama_bootstrap(&app, backend_port);
++                    return;
++                }
++            }
+             wait_for_port(11434, 30);
+         }
+ 
++        if shutdown_requested(&app) {
++            return;
++        }
+         let model = model_for_ram();
+         pull_model_with_progress(&app, &model);
+ 
+@@ -559,6 +622,8 @@ fn main() {
+     tauri::Builder::default()
+         .plugin(tauri_plugin_shell::init())
+         .manage(BackendState(Mutex::new(None)))
++        .manage(OllamaState(Mutex::new(None)))
++        .manage(ShutdownState(AtomicBool::new(false)))
+         .manage(AppStatus(Mutex::new(Status::initial())))
+         .manage(Navigated(Mutex::new(false)))
+         .manage(LastProbe(Mutex::new(String::new())))
+@@ -572,23 +637,8 @@ fn main() {
+             *handle.state::<Navigated>().0.lock().unwrap() = false;
+             persist_status_snapshot(&Status::initial());
+ 
+-            if let Some(w) = handle.get_webview_window("main") {
+-                let app_for_window = handle.clone();
+-                w.on_window_event(move |event| {
+-                    match event {
+-                        WindowEvent::CloseRequested { .. } => {
+-                            shutdown_app(&app_for_window, "ventana main CloseRequested");
+-                        }
+-                        WindowEvent::Destroyed => {
+-                            shutdown_app(&app_for_window, "ventana main Destroyed");
+-                            app_for_window.exit(0);
+-                        }
+-                        _ => {}
+-                    }
+-                });
+-            }
+-
+-            kill_backend_child(&*app.state::<BackendState>());
++            let backend_state = app.state::<BackendState>();
++            kill_backend_child(&backend_state);
+             let port = pick_port();
+             app.manage(BackendPort(port));
+             ollama_log(&format!("Puerto backend elegido: {}", port));
+@@ -610,6 +660,11 @@ fn main() {
+                     Ok((mut rx, child)) => {
+                         let backend_state = app.state::<BackendState>();
+                         let mut slot = backend_state.0.lock().unwrap();
++                        if shutdown_requested(&handle) {
++                            drop(slot);
++                            let _ = child.kill();
++                            return Ok(());
++                        }
+                         if slot.is_some() {
+                             ollama_log("WARN: sidecar slot ocupado; matando instancia duplicada");
+                             let _ = slot.take().map(|c| c.kill());
+@@ -625,7 +680,8 @@ fn main() {
+                                 }
+                             }
+                             ollama_log("sidecar backend: canal de eventos cerrado (proceso terminó?)");
+-                            shutdown_app(&sidecar_handle, "sidecar stdout/stderr EOF");
++                            let backend_state = sidecar_handle.state::<BackendState>();
++                            kill_backend_child(&backend_state);
+                         });
+                     }
+                     Err(e) => {
+@@ -689,12 +745,16 @@ fn main() {
+                     shutdown_app(app_handle, "RunEvent::Exit");
+                 }
+                 RunEvent::WindowEvent { label, event, .. } if label == "main" => {
+-                    if matches!(event, WindowEvent::CloseRequested { .. }) {
+-                        shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
+-                    }
+-                    if matches!(event, WindowEvent::Destroyed) {
+-                        shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
+-                        app_handle.exit(0);
++                    match event {
++                        WindowEvent::CloseRequested { .. } => {
++                            shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
++                            app_handle.exit(0);
++                        }
++                        WindowEvent::Destroyed => {
++                            shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
++                            app_handle.exit(0);
++                        }
++                        _ => {}
+                     }
+                 }
+                 _ => {}
+diff --git a/desktop/ui/accent.css b/desktop/ui/accent.css
+index 907bbfe..192f86e 100644
+--- a/desktop/ui/accent.css
++++ b/desktop/ui/accent.css
+@@ -1,2 +1,2 @@
+ /* Generado por configure.mjs — acento por-herramienta */
+-:root { --ccs-accent: #2E9E3F; }
++:root { --ccs-accent: #00D53A; }
+diff --git a/desktop/ui/ccs-theme.css b/desktop/ui/ccs-theme.css
+index ba1718a..f68613a 100644
+--- a/desktop/ui/ccs-theme.css
++++ b/desktop/ui/ccs-theme.css
+@@ -7,14 +7,15 @@
+  * ============================================================ */
+ 
+ :root {
+-  /* Paleta CCS existente; cada herramienta puede sobrescribir el acento. */
+-  --ccs-azul-oscuro: #0D3DA6;
+-  --ccs-azul:        #0D56CA;
+-  --ccs-celeste:     #3A6DDE;
+-  --ccs-verde:       #3DAE2B;
+-  --ccs-verde-brillante: #0DD700;
+-  --ccs-accent:      #2E9E3F;
+-  --ccs-accent-strong: #268833;
++  /* Paleta CCS aprobada para splash, tema e instalador. */
++  --ccs-azul-oscuro: #002558;
++  --ccs-azul:        #0056CA;
++  --ccs-celeste:     #3A89DA;
++  --ccs-verde:       #00D53A;
++  --ccs-verde-brillante: #00D700;
++  --ccs-accent:      #00D53A;
++  --ccs-accent-strong: #00D53A;
++  --ccs-gradient: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+ 
+   /* Neutros / superficies */
+   --bg-base:   #F7F8FA;
+@@ -54,7 +55,7 @@
+ 
+ /* Botón primario de acento con texto azul marino. */
+ .ccs-btn-primary {
+-  background: linear-gradient(135deg, var(--ccs-accent), var(--ccs-accent-strong));
++  background: var(--ccs-gradient);
+   color: var(--ccs-azul-oscuro);
+   border: 0;
+   border-bottom: 2px solid var(--ccs-azul-oscuro);
+@@ -70,5 +71,5 @@
+   display: block;
+   width: 64px; height: 4px; margin: 10px auto 0;
+   border-radius: 4px;
+-  background: linear-gradient(90deg, var(--ccs-azul-oscuro), var(--ccs-azul), var(--ccs-accent));
++  background: var(--ccs-gradient);
+ }
+diff --git a/desktop/ui/index.html b/desktop/ui/index.html
+index 5d1ef3f..de18ae0 100644
+--- a/desktop/ui/index.html
++++ b/desktop/ui/index.html
+@@ -18,7 +18,7 @@
+     html, body { height: 100%; }
+     body {
+       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+-      background: radial-gradient(circle at 50% 30%, #1e4a94 0%, #0f2a5a 100%);
++      background: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+       color: #fff; display: flex; flex-direction: column; align-items: center;
+       justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
+     }
+@@ -27,14 +27,14 @@
+     .brand .accent { color: var(--accent); }
+     .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
+     .track { width: 300px; max-width: 80vw; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.15); position: relative; }
+-    .fill { height: 100%; width: 0%; border-radius: 8px; background: linear-gradient(90deg, var(--navy), var(--mid), var(--accent)); transition: width 0.4s ease; }
++    .fill { height: 100%; width: 0%; border-radius: 8px; background: var(--ccs-gradient); transition: width 0.4s ease; }
+     .track.indeterminate .fill { width: 40% !important; position: absolute; left: -40%; animation: slide 1.2s infinite ease-in-out; }
+     @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+     .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
+     .pct { color: var(--accent); font-weight: 700; font-size: 13px; min-height: 16px; }
+     .enter {
+       margin-top: 12px; padding: 14px 32px; border-radius: 12px; border: 0; cursor: pointer;
+-      background: linear-gradient(135deg, var(--accent), var(--ccs-accent-strong)); color: var(--navy);
++      background: var(--ccs-gradient); color: var(--navy);
+       font-weight: 800; font-size: 18px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+       box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+     }
+diff --git a/desktop/ui/splash.template.html b/desktop/ui/splash.template.html
+index 790c853..7f91f9f 100644
+--- a/desktop/ui/splash.template.html
++++ b/desktop/ui/splash.template.html
+@@ -18,7 +18,7 @@
+     html, body { height: 100%; }
+     body {
+       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+-      background: radial-gradient(circle at 50% 30%, #1e4a94 0%, #0f2a5a 100%);
++      background: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+       color: #fff; display: flex; flex-direction: column; align-items: center;
+       justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
+     }
+@@ -27,14 +27,14 @@
+     .brand .accent { color: var(--accent); }
+     .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
+     .track { width: 300px; max-width: 80vw; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.15); position: relative; }
+-    .fill { height: 100%; width: 0%; border-radius: 8px; background: linear-gradient(90deg, var(--navy), var(--mid), var(--accent)); transition: width 0.4s ease; }
++    .fill { height: 100%; width: 0%; border-radius: 8px; background: var(--ccs-gradient); transition: width 0.4s ease; }
+     .track.indeterminate .fill { width: 40% !important; position: absolute; left: -40%; animation: slide 1.2s infinite ease-in-out; }
+     @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+     .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
+     .pct { color: var(--accent); font-weight: 700; font-size: 13px; min-height: 16px; }
+     .enter {
+       margin-top: 12px; padding: 14px 32px; border-radius: 12px; border: 0; cursor: pointer;
+-      background: linear-gradient(135deg, var(--accent), var(--ccs-accent-strong)); color: var(--navy);
++      background: var(--ccs-gradient); color: var(--navy);
+       font-weight: 800; font-size: 18px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+       box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+     }
+diff --git a/install.json b/install.json
+index d0ad8d7..27bde62 100644
+--- a/install.json
++++ b/install.json
+@@ -3,14 +3,14 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:20px;background:#f0f4ff;border-radius:12px;margin:16px;border:1px solid #0D3DA6'><h2 style='color:#0D3DA6;margin-bottom:8px'>CCS — Pyme Ledger AI</h2><p style='color:#475569'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#64748b;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
++        "html": "<div style='padding:20px;background:linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);border-radius:12px;margin:16px;border:1px solid #3A89DA'><h2 style='color:#002558;margin-bottom:8px'>CCS — SmartGastos</h2><p style='color:#002558'>Instalación automática. Este proceso puede tardar 5-15 minutos la primera vez.</p><p style='color:#002558;font-size:12px;margin-top:8px'>Plataforma: {{platform}} | RAM: {{ram}}GB | GPU: {{gpu || 'N/A'}}</p></div>"
+       }
+     },
+ 
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>1/4 — Verificando motor de IA (Ollama)...</h3><p style='color:#64748b'>Motor de IA local para ejecutar modelos 100% offline.</p></div>"
++        "html": "<div style='padding:16px'><h3 style='color:#002558'>1/4 — Verificando motor de IA (Ollama)...</h3><p style='color:#64748b'>Motor de IA local para ejecutar modelos 100% offline.</p></div>"
+       }
+     },
+ 
+@@ -25,7 +25,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>2/4 — Configurando entorno Python y dependencias...</h3><p style='color:#64748b'>Creando entorno virtual e instalando librerías (OCR, PDF, servidor web).</p></div>"
++        "html": "<div style='padding:16px'><h3 style='color:#002558'>2/4 — Configurando entorno Python y dependencias...</h3><p style='color:#64748b'>Creando entorno virtual e instalando librerías (OCR, PDF, servidor web).</p></div>"
+       }
+     },
+ 
+@@ -40,7 +40,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>3/4 — Descargando modelos de IA...</h3><p style='color:#64748b'>Agente de lenguaje (~500MB) y agente visual (~1.8GB). Solo se descarga una vez.</p></div>"
++        "html": "<div style='padding:16px'><h3 style='color:#002558'>3/4 — Descargando modelos de IA...</h3><p style='color:#64748b'>Agente de lenguaje (~500MB) y agente visual (~1.8GB). Solo se descarga una vez.</p></div>"
+       }
+     },
+ 
+@@ -55,7 +55,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>4/4 — Guardando configuración...</h3></div>"
++        "html": "<div style='padding:16px'><h3 style='color:#002558'>4/4 — Guardando configuración...</h3></div>"
+       }
+     },
+ 
+@@ -70,14 +70,14 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:20px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>Pyme Ledger AI está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
++        "html": "<div style='padding:20px;background:#e7f9ed;border-radius:8px;margin:16px;border:1px solid #00D53A'><h3 style='color:#00D53A;margin-bottom:8px'>Instalación completada</h3><p style='color:#374151'>SmartGastos está listo para usar:</p><ul style='color:#374151;margin-top:8px'><li>Motor de IA local configurado</li><li>Agentes de lenguaje y visión descargados</li><li>OCR multi-estrategia instalado</li><li>Base de datos configurada</li></ul><p style='margin-top:12px;color:#64748b'>Haz click en <strong>Iniciar</strong> para comenzar.</p></div>"
+       }
+     },
+ 
+     {
+       "method": "notify",
+       "params": {
+-        "html": "CCS Pyme Ledger AI instalado. Haz click en Iniciar para comenzar."
++        "html": "CCS SmartGastos instalado. Haz click en Iniciar para comenzar."
+       }
+     }
+   ]
+diff --git a/setup.py b/setup.py
+index 1188195..71664f9 100644
+--- a/setup.py
++++ b/setup.py
+@@ -92,9 +92,13 @@ def install_python_deps():
+     está bloqueado por el sistema operativo. Usar `python -m pip` evita este
+     problema completamente.
+     """
+-    req_file = BASE_DIR / "requirements.txt"
++    # El launcher instala el mismo subconjunto liviano que el sidecar Tauri:
++    # no incluye EasyOCR ni Torch; el OCR visual usa Ollama/moondream.
++    req_file = BASE_DIR / "requirements-desktop.txt"
+     if not req_file.exists():
+-        raise RuntimeError(f"requirements.txt no encontrado en {req_file}")
++        req_file = BASE_DIR / "requirements.txt"
++    if not req_file.exists():
++        raise RuntimeError(f"Archivo de dependencias no encontrado en {req_file}")
+ 
+     # Paso 1: Actualizar pip usando python -m pip (NUNCA pip.exe directo)
+     log("Actualizando pip ...")
+@@ -105,8 +109,8 @@ def install_python_deps():
+         "--quiet"
+     ], check=False)  # No fallar si pip ya está actualizado
+ 
+-    # Paso 2: Instalar requirements.txt
+-    log("Instalando requirements.txt ...")
++    # Paso 2: Instalar el subconjunto de dependencias del instalador.
++    log(f"Instalando {req_file.name} ...")
+     run([
+         str(VENV_PYTHON), "-m", "pip", "install",
+         "-r", str(req_file),
+diff --git a/start.json b/start.json
+index 25f05e4..e360a2c 100644
+--- a/start.json
++++ b/start.json
+@@ -4,7 +4,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>Iniciando Pyme Ledger AI...</h3><p style='color:#64748b'>Verificando motor de IA y servidor...</p></div>"
++        "html": "<div style='padding:16px;background:linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);border:1px solid #3A89DA;border-radius:8px'><h3 style='color:#002558'>Iniciando SmartGastos...</h3><p style='color:#002558'>Verificando motor de IA y servidor...</p></div>"
+       }
+     },
+     {
+diff --git a/stop.json b/stop.json
+index 49a5355..40346b2 100644
+--- a/stop.json
++++ b/stop.json
+@@ -3,7 +3,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px'><h3 style='color:#0D3DA6'>Deteniendo Pyme Ledger AI...</h3></div>"
++        "html": "<div style='padding:16px;background:linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);border:1px solid #3A89DA;border-radius:8px'><h3 style='color:#002558'>Deteniendo SmartGastos...</h3></div>"
+       }
+     },
+     {
+@@ -25,7 +25,7 @@
+     {
+       "method": "log",
+       "params": {
+-        "html": "<div style='padding:16px;background:#ecfdf5;border-radius:8px;margin:16px;border:1px solid #3DAE2B'><h3 style='color:#3DAE2B'>Pyme Ledger AI detenido correctamente.</h3></div>"
++        "html": "<div style='padding:16px;background:#e7f9ed;border-radius:8px;margin:16px;border:1px solid #00D53A'><h3 style='color:#00D53A'>SmartGastos detenido correctamente.</h3></div>"
+       }
+     }
+   ]
+diff --git a/tests/test_pinokio_config.py b/tests/test_pinokio_config.py
+index f839647..1e0ea3f 100644
+--- a/tests/test_pinokio_config.py
++++ b/tests/test_pinokio_config.py
+@@ -273,11 +273,34 @@ class TestUIFiles(unittest.TestCase):
+         self.assertEqual(cfg.get("publisher"), "Cámara de Comercio de Santiago")
+         self.assertEqual(cfg.get("productName"), "SmartGastos")
+         self.assertEqual(cfg.get("identifier"), "cl.ccs.smartgastos")
+-        self.assertEqual(cfg.get("accent"), "#2E9E3F")
++        self.assertEqual(cfg.get("accent"), "#00D53A")
+         self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.svg")
+         extra = (cfg.get("ollama") or {}).get("extraModels") or []
+         self.assertIn("moondream", extra)
+ 
++    def test_ccs_palette_is_applied_to_splash_and_installer_theme(self):
++        expected_gradient = (
++            "linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, "
++            "rgb(0, 86, 202) 56.75%)"
++        )
++        for relative_path in (
++            "desktop/ui/splash.template.html",
++            "desktop/ui/index.html",
++        ):
++            content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
++            self.assertIn(expected_gradient, content)
++        for relative_path in ("desktop/brand/ccs-theme.css", "desktop/ui/ccs-theme.css"):
++            content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
++            self.assertIn(expected_gradient, content)
++            self.assertIn("#00D53A", content)
++            self.assertIn("#002558", content)
++            self.assertIn("#3A89DA", content)
++        installer = (REPO_ROOT / "install.json").read_text(encoding="utf-8")
++        self.assertIn(expected_gradient, installer)
++        self.assertIn("#00D53A", installer)
++        self.assertIn("#002558", installer)
++        self.assertIn("#3A89DA", installer)
++
+     def test_requirements_desktop_no_easyocr(self):
+         lines = [
+             ln.strip().lower()
+@@ -288,6 +311,10 @@ class TestUIFiles(unittest.TestCase):
+         self.assertNotIn("easyocr", joined)
+         self.assertNotIn("torch", joined)
+ 
++    def test_launcher_uses_lightweight_desktop_requirements(self):
++        setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
++        self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
++
+ 
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.43.0
+

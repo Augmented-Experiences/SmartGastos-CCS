@@ -1,22 +1,22 @@
 // App de escritorio nativa SmartSuite (Tauri v2)
-#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
-use std::io::{BufRead, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Write;
+use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Child;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+mod ollama;
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,8 +43,14 @@ fn app_config() -> &'static AppConfig {
 }
 
 struct BackendState(Mutex<Option<CommandChild>>);
+/// Solo contiene el proceso `ollama serve` lanzado por esta instancia.
+struct OllamaState(Mutex<Option<Child>>);
+struct ShutdownState(AtomicBool);
 struct Navigated(Mutex<bool>);
 struct LastProbe(Mutex<String>);
+/// Puerto HTTP de Ollama para esta sesión (11434 u otro loopback).
+#[allow(dead_code)]
+struct OllamaListenPort(u16);
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -122,14 +128,6 @@ fn retry_backend(app: tauri::AppHandle, port: tauri::State<BackendPort>) -> Resu
     }
 }
 
-fn ollama_command() -> Command {
-    #[allow(unused_mut)]
-    let mut cmd = Command::new("ollama");
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    cmd
-}
-
 fn home_dir() -> PathBuf {
     #[cfg(windows)]
     {
@@ -193,7 +191,11 @@ fn backend_log(line: &str) {
 }
 
 fn kill_backend_child(state: &BackendState) {
-    if let Some(child) = state.0.lock().unwrap().take() {
+    let child = {
+        let mut slot = state.0.lock().unwrap();
+        slot.take()
+    };
+    if let Some(child) = child {
         ollama_log("kill_backend_child: terminando sidecar backend");
         match child.kill() {
             Ok(()) => ollama_log("kill_backend_child: OK"),
@@ -202,9 +204,37 @@ fn kill_backend_child(state: &BackendState) {
     }
 }
 
+fn kill_ollama_child(state: &OllamaState) {
+    let child = {
+        let mut slot = state.0.lock().unwrap();
+        slot.take()
+    };
+    if let Some(mut child) = child {
+        let pid = child.id();
+        ollama_log(&format!(
+            "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
+            pid
+        ));
+        ollama::kill_owned_child(&mut child);
+        ollama::clear_owned_pid(&user_data_dir());
+        ollama_log("kill_ollama_child: OK");
+    }
+}
+
+fn shutdown_requested(app: &tauri::AppHandle) -> bool {
+    app.state::<ShutdownState>().0.load(Ordering::Acquire)
+}
+
 fn shutdown_app(app: &tauri::AppHandle, reason: &str) {
+    if app.state::<ShutdownState>().0.swap(true, Ordering::AcqRel) {
+        return;
+    }
     ollama_log(&format!("shutdown_app: {}", reason));
-    kill_backend_child(&*app.state::<BackendState>());
+    // Bind the state before acquiring its Mutex to avoid a temporary State borrow.
+    let backend_state = app.state::<BackendState>();
+    kill_backend_child(&backend_state);
+    let ollama_state = app.state::<OllamaState>();
+    kill_ollama_child(&ollama_state);
 }
 
 fn pick_port() -> u16 {
@@ -217,16 +247,6 @@ fn pick_port() -> u16 {
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
         .unwrap_or(7860)
-}
-
-fn wait_for_port(port: u16, attempts: u32) -> bool {
-    for _ in 0..attempts {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(500));
-    }
-    false
 }
 
 fn backend_app_url(port: u16) -> String {
@@ -314,10 +334,12 @@ fn probe_backend(port: u16) -> ProbeResult {
         if r.status() == 200 {
             if let Ok(body) = r.into_string() {
                 ollama_log(&format!("/api/desktop-ui: {}", body));
-                if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false") {
+                if body.contains("\"indexExists\":false") || body.contains("\"indexExists\": false")
+                {
                     return ProbeResult {
                         ok: false,
-                        detail: "sidecar sin app/index.html empaquetado (rebuild PyInstaller)".into(),
+                        detail: "sidecar sin app/index.html empaquetado (rebuild PyInstaller)"
+                            .into(),
                     };
                 }
             }
@@ -337,11 +359,7 @@ fn probe_backend(port: u16) -> ProbeResult {
             } else {
                 ProbeResult {
                     ok: false,
-                    detail: format!(
-                        "GET / status {} (no HTML). head={:?}",
-                        status,
-                        snippet
-                    ),
+                    detail: format!("GET / status {} (no HTML). head={:?}", status, snippet),
                 }
             }
         }
@@ -371,10 +389,10 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
         s.backend_url = Some(url);
         s.can_continue = true;
         s.backend_error = None;
-        s.phase = "ready".into();
-        if s.message.starts_with("Descargando") || s.message.starts_with("Componente") {
-            s.message = "Servicios listos.".into();
+        if s.ollama_done {
+            s.phase = "ready".into();
         }
+        // No pisar el progreso de descarga/extracción/arranque/pull de Ollama.
     });
 }
 
@@ -398,8 +416,7 @@ fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), Str
     *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
     ollama_log(&format!(
         "navigate_main_to_backend probe: ok={} {}",
-        probe.ok,
-        probe.detail
+        probe.ok, probe.detail
     ));
     if !probe.ok {
         update_status(app, |s| {
@@ -435,56 +452,40 @@ fn model_for_ram() -> String {
         .unwrap_or_else(|| "llama3.2:3b".to_string())
 }
 
-fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
-    let body = format!("{{\"name\":\"{}\"}}", model);
-    let resp = ureq::post("http://127.0.0.1:11434/api/pull")
-        .set("Content-Type", "application/json")
-        .send_string(&body);
-    let resp = match resp {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-    let reader = std::io::BufReader::new(resp.into_reader());
-    let mut ok = false;
-    for line in reader.lines() {
-        let line = match line {
-            Ok(l) => l,
-            Err(_) => break,
-        };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let v: serde_json::Value = match serde_json::from_str(&line) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        if v.get("error").is_some() {
-            ok = false;
-            break;
-        }
-        let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
-        let total = v.get("total").and_then(|t| t.as_u64());
-        let completed = v.get("completed").and_then(|c| c.as_u64());
-        let pct: i32 = match (total, completed) {
-            (Some(t), Some(c)) if t > 0 => ((c.min(t) * 100) / t) as i32,
-            _ => -1,
-        };
-        let msg = if pct >= 0 {
-            format!("Descargando el modelo {} - {}%", model, pct)
-        } else {
-            format!("Preparando el modelo {} ({})...", model, status)
-        };
-        ollama_log(&msg);
-        update_status(app, |s| {
-            s.phase = "downloading".into();
-            s.message = msg.clone();
-            s.percent = pct;
-        });
-        if status == "success" {
-            ok = true;
-        }
+fn status_progress(app: &tauri::AppHandle, phase: &str, percent: i32, message: &str) {
+    ollama_log(message);
+    update_status(app, |s| {
+        s.phase = phase.into();
+        s.message = message.into();
+        s.percent = percent;
+    });
+}
+
+fn take_owned_slot(app: &tauri::AppHandle, mut child: Child) -> bool {
+    let pid = child.id();
+    let ollama_state = app.state::<OllamaState>();
+    let mut slot = ollama_state.0.lock().unwrap();
+    if shutdown_requested(app) {
+        drop(slot);
+        ollama::kill_owned_child(&mut child);
+        ollama::clear_owned_pid(&user_data_dir());
+        return false;
     }
-    ok
+    if let Some(mut previous) = slot.replace(child) {
+        ollama::kill_owned_child(&mut previous);
+    }
+    ollama::record_owned_pid(&user_data_dir(), pid);
+    ollama_log(&format!(
+        "Ollama portable iniciado por esta instancia (pid={})",
+        pid
+    ));
+    true
+}
+
+fn pull_model_with_progress(app: &tauri::AppHandle, port: u16, model: &str) -> bool {
+    ollama::pull_model(port, model, |pct, msg| {
+        status_progress(app, "downloading", pct, msg);
+    })
 }
 
 fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
@@ -511,43 +512,117 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
     ollama_log("ollama_done=true; splash debe hacer location.replace('/') via /api/desktop-status");
 }
 
-fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
+fn bootstrap_ollama(
+    app: tauri::AppHandle,
+    backend_port: u16,
+    ollama_port: u16,
+    already_healthy: bool,
+) {
     std::thread::spawn(move || {
-        update_status(&app, |s| {
-            s.phase = "ollama".into();
-            s.message = "Verificando el motor de IA (Ollama)...".into();
-            s.percent = -1;
-        });
+        if shutdown_requested(&app) {
+            return;
+        }
+        status_progress(&app, "ollama", -1, "Verificando el motor de IA (Ollama)...");
 
-        let installed = ollama_command()
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !installed {
+        let data_dir = user_data_dir();
+        if already_healthy {
+            ollama_log(&format!(
+                "Usando Ollama ya en marcha en {} (no se registra PID propio)",
+                ollama::api_base(ollama_port)
+            ));
+        } else {
+            match ollama::ensure_portable_binary(&data_dir, |pct, msg| {
+                let phase = if msg.starts_with("Extrayendo") {
+                    "extract"
+                } else {
+                    "download"
+                };
+                status_progress(&app, phase, pct, msg);
+            }) {
+                Ok(bin) => {
+                    if shutdown_requested(&app) {
+                        return;
+                    }
+                    if ollama::api_healthy(ollama_port) {
+                        ollama_log(
+                            "Ollama respondio en el puerto elegido antes de spawn; no se toma PID",
+                        );
+                    } else {
+                        status_progress(&app, "start", -1, "Iniciando el servicio de IA...");
+                        match ollama::spawn_serve(&bin, ollama_port, &ollama::models_dir(&data_dir))
+                        {
+                            Ok(child) => {
+                                if !take_owned_slot(&app, child) {
+                                    return;
+                                }
+                            }
+                            Err(e) => {
+                                ollama_log(&format!("No se pudo iniciar Ollama portable: {}", e));
+                                status_progress(
+                                    &app,
+                                    "warning",
+                                    -1,
+                                    "No se pudo iniciar Ollama. La app continuara sin IA.",
+                                );
+                                finish_ollama_bootstrap(&app, backend_port);
+                                return;
+                            }
+                        }
+                        if !ollama::wait_until_healthy(ollama_port, 60) {
+                            ollama_log("Ollama portable no respondio a /api/tags");
+                            status_progress(
+                                &app,
+                                "warning",
+                                -1,
+                                "Ollama no respondio a tiempo. La app continuara sin IA.",
+                            );
+                            finish_ollama_bootstrap(&app, backend_port);
+                            return;
+                        }
+                        ollama_log(&format!(
+                            "Ollama portable listo en {}",
+                            ollama::api_base(ollama_port)
+                        ));
+                    }
+                }
+                Err(e) => {
+                    ollama_log(&format!("Ollama portable no disponible: {}", e));
+                    status_progress(
+                        &app,
+                        "warning",
+                        -1,
+                        "No se pudo descargar Ollama. La app continuara sin IA.",
+                    );
+                    finish_ollama_bootstrap(&app, backend_port);
+                    return;
+                }
+            }
+        }
+
+        if shutdown_requested(&app) {
+            return;
+        }
+        if !ollama::api_healthy(ollama_port) {
+            ollama_log("API de Ollama no saludable; se omite pull");
             finish_ollama_bootstrap(&app, backend_port);
             return;
         }
 
-        if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
-            let mut cmd = ollama_command();
-            cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
-            let _ = cmd.spawn();
-            wait_for_port(11434, 30);
-        }
-
         let model = model_for_ram();
-        pull_model_with_progress(&app, &model);
+        let _ = pull_model_with_progress(&app, ollama_port, &model);
 
         for extra in &app_config().extra_models {
-            pull_model_with_progress(&app, extra);
+            if shutdown_requested(&app) {
+                return;
+            }
+            let _ = pull_model_with_progress(&app, ollama_port, extra);
             ollama_log(&format!("Modelo adicional '{}' listo.", extra));
-            update_status(&app, |s| {
-                s.message = format!("Componente {} listo.", extra);
-                s.percent = 100;
-            });
+            status_progress(
+                &app,
+                "downloading",
+                100,
+                &format!("Componente {} listo.", extra),
+            );
         }
 
         ollama_log("extra_models terminado; entrando a finish_ollama_bootstrap");
@@ -559,6 +634,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(BackendState(Mutex::new(None)))
+        .manage(OllamaState(Mutex::new(None)))
+        .manage(ShutdownState(AtomicBool::new(false)))
         .manage(AppStatus(Mutex::new(Status::initial())))
         .manage(Navigated(Mutex::new(false)))
         .manage(LastProbe(Mutex::new(String::new())))
@@ -572,32 +649,27 @@ fn main() {
             *handle.state::<Navigated>().0.lock().unwrap() = false;
             persist_status_snapshot(&Status::initial());
 
-            if let Some(w) = handle.get_webview_window("main") {
-                let app_for_window = handle.clone();
-                w.on_window_event(move |event| {
-                    match event {
-                        WindowEvent::CloseRequested { .. } => {
-                            shutdown_app(&app_for_window, "ventana main CloseRequested");
-                        }
-                        WindowEvent::Destroyed => {
-                            shutdown_app(&app_for_window, "ventana main Destroyed");
-                            app_for_window.exit(0);
-                        }
-                        _ => {}
-                    }
-                });
-            }
-
-            kill_backend_child(&*app.state::<BackendState>());
+            let backend_state = app.state::<BackendState>();
+            kill_backend_child(&backend_state);
             let port = pick_port();
             app.manage(BackendPort(port));
             ollama_log(&format!("Puerto backend elegido: {}", port));
+
+            let (ollama_port, ollama_already_healthy) = ollama::decide_listen_port();
+            app.manage(OllamaListenPort(ollama_port));
+            ollama_log(&format!(
+                "Ollama HTTP {} (ya saludable={})",
+                ollama::api_base(ollama_port),
+                ollama_already_healthy
+            ));
 
             let data_dir = user_data_dir().to_string_lossy().to_string();
             let backend_state = app.state::<BackendState>();
             if backend_state.0.lock().unwrap().is_some() {
                 ollama_log("WARN: sidecar ya registrado; omitiendo segundo spawn");
             }
+            let ollama_url = ollama::api_base(ollama_port);
+            let ollama_host = format!("127.0.0.1:{}", ollama_port);
             let sidecar = app.shell().sidecar("backend");
             match sidecar {
                 Ok(cmd) => match cmd
@@ -605,11 +677,18 @@ fn main() {
                     .env("DATA_DIR", data_dir)
                     .env("RUN_BY_TAURI", "1")
                     .env("PYTHONIOENCODING", "utf-8")
+                    .env("OLLAMA_URL", ollama_url)
+                    .env("OLLAMA_HOST", ollama_host)
                     .spawn()
                 {
                     Ok((mut rx, child)) => {
                         let backend_state = app.state::<BackendState>();
                         let mut slot = backend_state.0.lock().unwrap();
+                        if shutdown_requested(&handle) {
+                            drop(slot);
+                            let _ = child.kill();
+                            return Ok(());
+                        }
                         if slot.is_some() {
                             ollama_log("WARN: sidecar slot ocupado; matando instancia duplicada");
                             let _ = slot.take().map(|c| c.kill());
@@ -625,7 +704,8 @@ fn main() {
                                 }
                             }
                             ollama_log("sidecar backend: canal de eventos cerrado (proceso terminó?)");
-                            shutdown_app(&sidecar_handle, "sidecar stdout/stderr EOF");
+                            let backend_state = sidecar_handle.state::<BackendState>();
+                            kill_backend_child(&backend_state);
                         });
                     }
                     Err(e) => {
@@ -667,7 +747,7 @@ fn main() {
                 }
             });
 
-            bootstrap_ollama(handle.clone(), port);
+            bootstrap_ollama(handle.clone(), port, ollama_port, ollama_already_healthy);
 
             let ready_handle = handle.clone();
             std::thread::spawn(move || {
@@ -689,12 +769,16 @@ fn main() {
                     shutdown_app(app_handle, "RunEvent::Exit");
                 }
                 RunEvent::WindowEvent { label, event, .. } if label == "main" => {
-                    if matches!(event, WindowEvent::CloseRequested { .. }) {
-                        shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
-                    }
-                    if matches!(event, WindowEvent::Destroyed) {
-                        shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
-                        app_handle.exit(0);
+                    match event {
+                        WindowEvent::CloseRequested { .. } => {
+                            shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
+                            app_handle.exit(0);
+                        }
+                        WindowEvent::Destroyed => {
+                            shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
+                            app_handle.exit(0);
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}

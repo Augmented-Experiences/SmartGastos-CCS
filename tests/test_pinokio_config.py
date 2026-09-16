@@ -273,12 +273,105 @@ class TestUIFiles(unittest.TestCase):
         self.assertEqual(cfg.get("publisher"), "Cámara de Comercio de Santiago")
         self.assertEqual(cfg.get("productName"), "SmartGastos")
         self.assertEqual(cfg.get("identifier"), "cl.ccs.smartgastos")
-        self.assertEqual(cfg.get("accent"), "#2E9E3F")
+        self.assertEqual(cfg.get("accent"), "#00D53A")
         self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.svg")
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
         self.assertIn("moondream", extra)
 
+    def test_ccs_palette_is_applied_to_splash_and_installer_theme(self):
+        expected_gradient = (
+            "linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, "
+            "rgb(0, 86, 202) 56.75%)"
+        )
+        for relative_path in (
+            "desktop/ui/splash.template.html",
+            "desktop/ui/index.html",
+        ):
+            content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn(expected_gradient, content)
+        for relative_path in ("desktop/brand/ccs-theme.css", "desktop/ui/ccs-theme.css"):
+            content = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn(expected_gradient, content)
+            self.assertIn("#00D53A", content)
+            self.assertIn("#002558", content)
+            self.assertIn("#3A89DA", content)
+        installer = (REPO_ROOT / "install.json").read_text(encoding="utf-8")
+        self.assertIn(expected_gradient, installer)
+        self.assertIn("#00D53A", installer)
+        self.assertIn("#002558", installer)
+        self.assertIn("#3A89DA", installer)
+
     def test_requirements_desktop_no_easyocr(self):
+        lines = [
+            ln.strip().lower()
+            for ln in (REPO_ROOT / "requirements-desktop.txt").read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+        joined = "\n".join(lines)
+        self.assertNotIn("easyocr", joined)
+        self.assertNotIn("torch", joined)
+
+    def test_launcher_uses_lightweight_desktop_requirements(self):
+        setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
+        self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
+
+
+class TestPortableOllama(unittest.TestCase):
+    """La app de escritorio descarga Ollama portable; no usa MSI ni torch/OCR extra."""
+
+    def setUp(self):
+        src = REPO_ROOT / "desktop" / "src-tauri" / "src"
+        self.main = (src / "main.rs").read_text(encoding="utf-8")
+        self.ollama = (src / "ollama.rs").read_text(encoding="utf-8")
+        self.joined = self.main + "\n" + self.ollama
+        self.splash = (REPO_ROOT / "desktop" / "ui" / "splash.template.html").read_text(
+            encoding="utf-8"
+        )
+
+    def test_downloads_official_windows_zip_and_linux_tgz(self):
+        self.assertIn("ollama-windows-amd64.zip", self.ollama)
+        self.assertIn("ollama-linux-amd64.tgz", self.ollama)
+        self.assertIn("releases/latest/download", self.ollama)
+
+    def test_never_runs_windows_system_installer(self):
+        lowered = self.joined.lower()
+        for banned in ("ollamasetup.exe", "winget", ".msi", "verysilent", "install.sh"):
+            self.assertNotIn(banned, lowered, f"no debe invocar instalador de sistema ({banned})")
+
+    def test_prefers_healthy_system_daemon_and_records_owned_pid(self):
+        self.assertIn("decide_listen_port", self.joined)
+        self.assertIn("api/tags", self.ollama)
+        self.assertIn("owned.pid", self.ollama)
+        self.assertIn("record_owned_pid", self.joined)
+        self.assertIn("kill_owned_child", self.joined)
+        self.assertNotIn("Command::new(\"pkill\")", self.joined)
+        self.assertNotIn("pkill -f", self.joined)
+
+    def test_sidecar_gets_ollama_url_and_continues_without_restart(self):
+        self.assertIn('env("OLLAMA_URL"', self.main)
+        self.assertIn("ensure_portable_binary", self.main)
+        self.assertIn("spawn_serve", self.main)
+        self.assertIn("finish_ollama_bootstrap", self.main)
+
+    def test_product_models_are_llama31_and_moondream(self):
+        import json
+        cfg = json.loads(
+            (REPO_ROOT / "desktop" / "smartsuite.config.json").read_text(encoding="utf-8")
+        )
+        extra = (cfg.get("ollama") or {}).get("extraModels") or []
+        tiers = (cfg.get("ollama") or {}).get("tiers") or []
+        self.assertIn("moondream", extra)
+        self.assertTrue(any(t.get("model") == "llama3.1:8b" for t in tiers))
+        self.assertIn("extra_models", self.main)
+        self.assertIn("model_for_ram", self.main)
+
+    def test_splash_shows_ollama_progress(self):
+        self.assertIn("/api/desktop-status", self.splash)
+        self.assertIn("s.message", self.splash)
+        self.assertIn("s.percent", self.splash)
+        self.assertIn("ollamaDone", self.splash)
+
+    def test_desktop_requirements_still_exclude_easyocr_torch(self):
         lines = [
             ln.strip().lower()
             for ln in (REPO_ROOT / "requirements-desktop.txt").read_text(encoding="utf-8").splitlines()

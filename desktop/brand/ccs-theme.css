@@ -7,14 +7,15 @@
  * ============================================================ */
 
 :root {
-  /* Paleta CCS existente; cada herramienta puede sobrescribir el acento. */
-  --ccs-azul-oscuro: #0D3DA6;
-  --ccs-azul:        #0D56CA;
-  --ccs-celeste:     #3A6DDE;
-  --ccs-verde:       #3DAE2B;
-  --ccs-verde-brillante: #0DD700;
-  --ccs-accent:      #2E9E3F;
-  --ccs-accent-strong: #268833;
+  /* Paleta CCS aprobada para splash, tema e instalador. */
+  --ccs-azul-oscuro: #002558;
+  --ccs-azul:        #0056CA;
+  --ccs-celeste:     #3A89DA;
+  --ccs-verde:       #00D53A;
+  --ccs-verde-brillante: #00D700;
+  --ccs-accent:      #00D53A;
+  --ccs-accent-strong: #00D53A;
+  --ccs-gradient: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
 
   /* Neutros / superficies */
   --bg-base:   #F7F8FA;
@@ -54,7 +55,7 @@
 
 /* Botón primario de acento con texto azul marino. */
 .ccs-btn-primary {
-  background: linear-gradient(135deg, var(--ccs-accent), var(--ccs-accent-strong));
+  background: var(--ccs-gradient);
   color: var(--ccs-azul-oscuro);
   border: 0;
   border-bottom: 2px solid var(--ccs-azul-oscuro);
@@ -70,5 +71,5 @@
   display: block;
   width: 64px; height: 4px; margin: 10px auto 0;
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--ccs-azul-oscuro), var(--ccs-azul), var(--ccs-accent));
+  background: var(--ccs-gradient);
 }

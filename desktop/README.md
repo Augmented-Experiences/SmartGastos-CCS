@@ -13,12 +13,17 @@ Ventana Tauri (webview nativo)
 Rust (src-tauri/src/main.rs) — genérico para todas las herramientas
   1. Elige un puerto libre.
   2. Lanza el backend empaquetado como "sidecar" (backend), pasándole
-     PORT y DATA_DIR por variables de entorno.
-  3. Prepara Ollama (best-effort): serve + pull del modelo según RAM
-     (modelos definidos por herramienta en appconfig.json).
-  4. Muestra el progreso en la pantalla de carga y, al estar listo,
-     navega a http://127.0.0.1:<puerto>/ui/index.html (la UI real).
-  5. Al cerrar la app, detiene el backend.
+     PORT, DATA_DIR y OLLAMA_URL por variables de entorno.
+  3. Prepara Ollama **sin MSI ni instalador de sistema**: si ya hay un
+     daemon saludable en 11434 lo reutiliza; si no, descarga el zip/tgz
+     oficial a la carpeta de datos (`%APPDATA%/SmartGastos/ollama` o
+     `~/.local/share/SmartGastos/ollama`), arranca `serve` y hace pull
+     de los modelos (LLM según RAM + `moondream` para OCR). Sin reiniciar
+     la app. Al cerrar, mata el sidecar y **solo** el Ollama que esta
+     instancia arrancó.
+  4. Muestra el progreso (descarga / extracción / arranque / pull) en la
+     pantalla de carga y, al estar listo, navega a la UI real.
+  5. Al cerrar la app, detiene el backend y el sidecar de Ollama propio.
         │
         ▼
 Backend FastAPI (server/app.py) empaquetado con PyInstaller
@@ -54,7 +59,7 @@ Todo lo específico de cada app vive en `desktop/smartsuite.config.json`:
 - Rust (stable) + Cargo.
 - Node 18+ (para la CLI de Tauri).
 - Linux: `libwebkit2gtk-4.1-dev`, `librsvg2-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `patchelf`, `build-essential` (ver CI).
-- **Ollama** NO se empaqueta: se instala/usa en la máquina del usuario (la app intenta prepararlo automáticamente si está presente).
+- **Ollama** NO se empaqueta en el instalador y **no** se ejecuta el MSI/setup de Windows. En el primer arranque la app descarga una copia portable oficial (zip en Windows amd64, tgz en Linux) al directorio de datos del producto y la inicia. Si el usuario ya tiene Ollama respondiendo en `127.0.0.1:11434`, se reutiliza y no se mata al salir.
 
 ## Build local
 
@@ -123,4 +128,4 @@ Los instaladores de cada SO deben construirse en su propio SO. Usa el workflow d
 
 ## Cómo funciona con Ollama y los modelos
 
-Igual que la versión Pinokio: Ollama y los modelos viven en la máquina del usuario. Al iniciar, la app (best-effort) arranca `ollama serve` y descarga el modelo según la RAM (`<6 GB` → `llama3.2:1b`, `6–12 GB` → `llama3.2:3b`, `>12 GB` → `llama3.1:8b`). Si Ollama no está instalado, la app abre igual y la UI indica que el motor de IA está desconectado con instrucciones. Requiere internet solo la primera vez; luego funciona 100% local.
+Al iniciar, la app comprueba si Ollama ya responde en `127.0.0.1:11434`. Si no, usa (o descarga) un binario portable en el directorio de datos, arranca `serve` y descarga el modelo según la RAM (`<6 GB` → `llama3.2:1b`, `6–12 GB` → `llama3.2:3b`, `>12 GB` → `llama3.1:8b`) más `moondream` para OCR. El splash muestra el progreso; la app **no se reinicia**. Requiere internet solo la primera vez; luego funciona 100% local. El OCR sigue siendo moondream vía la API HTTP de Ollama (no easyocr/torch en el instalador).

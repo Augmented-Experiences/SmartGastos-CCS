@@ -20,7 +20,7 @@ winget install -e --id Microsoft.VisualStudio.2022.BuildTools
   ```powershell
   rustup default stable-msvc
   ```
-- WebView2 ya viene en Windows 10/11. Ollama **no** es necesario para compilar (la app lo prepara al ejecutarse).
+- WebView2 ya viene en Windows 10/11. Ollama **no** es necesario para compilar ni hay que instalar el MSI: al ejecutarse, la app descarga `ollama-windows-amd64.zip` a `%APPDATA%\SmartGastos\ollama\` si no hay un daemon saludable en 11434.
 - Usa **Python 3.12** exactamente (no 3.13/3.14; numpy 1.26.4 no tiene wheels para esas versiones).
 
 ---
@@ -92,4 +92,4 @@ Si prefieres no usar el `.patch`, en cada repo (SmartRedes/SmartGastos):
 ## Problemas frecuentes
 - **`numpy ... Preparing metadata ... error`**: usas Python 3.13/3.14. Usa 3.12 (`py -3.12 -m venv venv`).
 - **`rustc no reconocido`**: instala Rust (rustup) y reabre la terminal; `rustup default stable-msvc`.
-- **La app abre pero la IA dice "desconectado"**: instala Ollama (https://ollama.com/download) y reinicia; la app descargará el/los modelo(s) con progreso.
+- **La app abre pero la IA dice "desconectado"**: no instales el MSI. Cierra y vuelve a abrir la app (o pulsa Entrar y espera): el splash descarga la copia portable de Ollama y los modelos (`llama3.1:8b` según RAM + `moondream`) sin reiniciar. Revisa `%APPDATA%\SmartGastos\logs\ollama.log` si falla la descarga.

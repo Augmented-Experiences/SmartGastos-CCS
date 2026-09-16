@@ -1,0 +1,1494 @@
+From 9033f096aa628ecda779ad9b70a7f1f1e3308d1c Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Wed, 16 Sep 2026 21:00:16 +0000
+Subject: [PATCH] feat: portable in-app Ollama bootstrap without MSI
+
+Download the official Windows zip / Linux tgz into the product data
+dir, start serve, and pull models on the splash without restarting.
+Reuse a healthy system daemon on 11434; only kill the Ollama PID this
+app started.
+---
+ desktop/README.md               |  21 +-
+ desktop/WINDOWS-BUILD.md        |   4 +-
+ desktop/src-tauri/Cargo.lock    | 196 +++++++++++-
+ desktop/src-tauri/Cargo.toml    |   5 +-
+ desktop/src-tauri/src/main.rs   | 278 ++++++++--------
+ desktop/src-tauri/src/ollama.rs | 551 ++++++++++++++++++++++++++++++++
+ desktop/ui/index.html           |   2 +-
+ desktop/ui/splash.template.html |   2 +-
+ tests/test_pinokio_config.py    |  66 ++++
+ 9 files changed, 983 insertions(+), 142 deletions(-)
+ create mode 100644 desktop/src-tauri/src/ollama.rs
+
+diff --git a/desktop/README.md b/desktop/README.md
+index b467b23..dff8578 100644
+--- a/desktop/README.md
++++ b/desktop/README.md
+@@ -13,12 +13,17 @@ Ventana Tauri (webview nativo)
+ Rust (src-tauri/src/main.rs) — genérico para todas las herramientas
+   1. Elige un puerto libre.
+   2. Lanza el backend empaquetado como "sidecar" (backend), pasándole
+-     PORT y DATA_DIR por variables de entorno.
+-  3. Prepara Ollama (best-effort): serve + pull del modelo según RAM
+-     (modelos definidos por herramienta en appconfig.json).
+-  4. Muestra el progreso en la pantalla de carga y, al estar listo,
+-     navega a http://127.0.0.1:<puerto>/ui/index.html (la UI real).
+-  5. Al cerrar la app, detiene el backend.
++     PORT, DATA_DIR y OLLAMA_URL por variables de entorno.
++  3. Prepara Ollama **sin MSI ni instalador de sistema**: si ya hay un
++     daemon saludable en 11434 lo reutiliza; si no, descarga el zip/tgz
++     oficial a la carpeta de datos (`%APPDATA%/SmartGastos/ollama` o
++     `~/.local/share/SmartGastos/ollama`), arranca `serve` y hace pull
++     de los modelos (LLM según RAM + `moondream` para OCR). Sin reiniciar
++     la app. Al cerrar, mata el sidecar y **solo** el Ollama que esta
++     instancia arrancó.
++  4. Muestra el progreso (descarga / extracción / arranque / pull) en la
++     pantalla de carga y, al estar listo, navega a la UI real.
++  5. Al cerrar la app, detiene el backend y el sidecar de Ollama propio.
+         │
+         ▼
+ Backend FastAPI (server/app.py) empaquetado con PyInstaller
+@@ -54,7 +59,7 @@ Todo lo específico de cada app vive en `desktop/smartsuite.config.json`:
+ - Rust (stable) + Cargo.
+ - Node 18+ (para la CLI de Tauri).
+ - Linux: `libwebkit2gtk-4.1-dev`, `librsvg2-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `patchelf`, `build-essential` (ver CI).
+-- **Ollama** NO se empaqueta: se instala/usa en la máquina del usuario (la app intenta prepararlo automáticamente si está presente).
++- **Ollama** NO se empaqueta en el instalador y **no** se ejecuta el MSI/setup de Windows. En el primer arranque la app descarga una copia portable oficial (zip en Windows amd64, tgz en Linux) al directorio de datos del producto y la inicia. Si el usuario ya tiene Ollama respondiendo en `127.0.0.1:11434`, se reutiliza y no se mata al salir.
+ 
+ ## Build local
+ 
+@@ -123,4 +128,4 @@ Los instaladores de cada SO deben construirse en su propio SO. Usa el workflow d
+ 
+ ## Cómo funciona con Ollama y los modelos
+ 
+-Igual que la versión Pinokio: Ollama y los modelos viven en la máquina del usuario. Al iniciar, la app (best-effort) arranca `ollama serve` y descarga el modelo según la RAM (`<6 GB` → `llama3.2:1b`, `6–12 GB` → `llama3.2:3b`, `>12 GB` → `llama3.1:8b`). Si Ollama no está instalado, la app abre igual y la UI indica que el motor de IA está desconectado con instrucciones. Requiere internet solo la primera vez; luego funciona 100% local.
++Al iniciar, la app comprueba si Ollama ya responde en `127.0.0.1:11434`. Si no, usa (o descarga) un binario portable en el directorio de datos, arranca `serve` y descarga el modelo según la RAM (`<6 GB` → `llama3.2:1b`, `6–12 GB` → `llama3.2:3b`, `>12 GB` → `llama3.1:8b`) más `moondream` para OCR. El splash muestra el progreso; la app **no se reinicia**. Requiere internet solo la primera vez; luego funciona 100% local. El OCR sigue siendo moondream vía la API HTTP de Ollama (no easyocr/torch en el instalador).
+diff --git a/desktop/WINDOWS-BUILD.md b/desktop/WINDOWS-BUILD.md
+index 756b89b..6e2dae6 100644
+--- a/desktop/WINDOWS-BUILD.md
++++ b/desktop/WINDOWS-BUILD.md
+@@ -20,7 +20,7 @@ winget install -e --id Microsoft.VisualStudio.2022.BuildTools
+   ```powershell
+   rustup default stable-msvc
+   ```
+-- WebView2 ya viene en Windows 10/11. Ollama **no** es necesario para compilar (la app lo prepara al ejecutarse).
++- WebView2 ya viene en Windows 10/11. Ollama **no** es necesario para compilar ni hay que instalar el MSI: al ejecutarse, la app descarga `ollama-windows-amd64.zip` a `%APPDATA%\SmartGastos\ollama\` si no hay un daemon saludable en 11434.
+ - Usa **Python 3.12** exactamente (no 3.13/3.14; numpy 1.26.4 no tiene wheels para esas versiones).
+ 
+ ---
+@@ -92,4 +92,4 @@ Si prefieres no usar el `.patch`, en cada repo (SmartRedes/SmartGastos):
+ ## Problemas frecuentes
+ - **`numpy ... Preparing metadata ... error`**: usas Python 3.13/3.14. Usa 3.12 (`py -3.12 -m venv venv`).
+ - **`rustc no reconocido`**: instala Rust (rustup) y reabre la terminal; `rustup default stable-msvc`.
+-- **La app abre pero la IA dice "desconectado"**: instala Ollama (https://ollama.com/download) y reinicia; la app descargará el/los modelo(s) con progreso.
++- **La app abre pero la IA dice "desconectado"**: no instales el MSI. Cierra y vuelve a abrir la app (o pulsa Entrar y espera): el splash descarga la copia portable de Ollama y los modelos (`llama3.1:8b` según RAM + `moondream`) sin reiniciar. Revisa `%APPDATA%\SmartGastos\logs\ollama.log` si falla la descarga.
+diff --git a/desktop/src-tauri/Cargo.lock b/desktop/src-tauri/Cargo.lock
+index 2a3d0db..98f977a 100644
+--- a/desktop/src-tauri/Cargo.lock
++++ b/desktop/src-tauri/Cargo.lock
+@@ -372,7 +372,7 @@ dependencies = [
+  "bitflags 2.13.2",
+  "core-foundation",
+  "core-graphics-types",
+- "foreign-types",
++ "foreign-types 0.5.0",
+  "libc",
+ ]
+ 
+@@ -836,6 +836,16 @@ dependencies = [
+  "rustc_version",
+ ]
+ 
++[[package]]
++name = "filetime"
++version = "0.2.29"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
++dependencies = [
++ "cfg-if",
++ "libc",
++]
++
+ [[package]]
+ name = "find-msvc-tools"
+ version = "0.1.12"
+@@ -865,6 +875,15 @@ version = "0.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+ 
++[[package]]
++name = "foreign-types"
++version = "0.3.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f6f339eb8adc052cd2ca78910fda869aefa38d22d5cb648e6485e4d3fc06f3b1"
++dependencies = [
++ "foreign-types-shared 0.1.1",
++]
++
+ [[package]]
+ name = "foreign-types"
+ version = "0.5.0"
+@@ -872,7 +891,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "d737d9aa519fb7b749cbc3b962edcf310a8dd1f4b67c91c4f83975dbdd17d965"
+ dependencies = [
+  "foreign-types-macros",
+- "foreign-types-shared",
++ "foreign-types-shared 0.3.1",
+ ]
+ 
+ [[package]]
+@@ -886,6 +905,12 @@ dependencies = [
+  "syn 3.0.5",
+ ]
+ 
++[[package]]
++name = "foreign-types-shared"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
++
+ [[package]]
+ name = "foreign-types-shared"
+ version = "0.3.1"
+@@ -1814,6 +1839,12 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "linux-raw-sys"
++version = "0.12.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
++
+ [[package]]
+ name = "litemap"
+ version = "0.8.3"
+@@ -1946,6 +1977,23 @@ version = "1.0.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
+ 
++[[package]]
++name = "native-tls"
++version = "0.2.18"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2"
++dependencies = [
++ "libc",
++ "log",
++ "openssl",
++ "openssl-probe",
++ "openssl-sys",
++ "schannel",
++ "security-framework",
++ "security-framework-sys",
++ "tempfile",
++]
++
+ [[package]]
+ name = "ndk"
+ version = "0.9.0"
+@@ -2234,6 +2282,49 @@ dependencies = [
+  "libc",
+ ]
+ 
++[[package]]
++name = "openssl"
++version = "0.10.81"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "77823a27f0babb03091cb9ed9ef80af3b39dbc82f97e8fa530374b7dafd87a45"
++dependencies = [
++ "bitflags 2.13.2",
++ "cfg-if",
++ "foreign-types 0.3.2",
++ "libc",
++ "openssl-macros",
++ "openssl-sys",
++]
++
++[[package]]
++name = "openssl-macros"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 2.0.119",
++]
++
++[[package]]
++name = "openssl-probe"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
++
++[[package]]
++name = "openssl-sys"
++version = "0.9.117"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b47e7e6bb2c38cd930d25a23b40fa52e068c10e85f3e03a7f5ba5aaca5713695"
++dependencies = [
++ "cc",
++ "libc",
++ "pkg-config",
++ "vcpkg",
++]
++
+ [[package]]
+ name = "option-ext"
+ version = "0.2.0"
+@@ -2680,6 +2771,19 @@ dependencies = [
+  "semver",
+ ]
+ 
++[[package]]
++name = "rustix"
++version = "1.1.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
++dependencies = [
++ "bitflags 2.13.2",
++ "errno",
++ "libc",
++ "linux-raw-sys",
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "rustversion"
+ version = "1.0.23"
+@@ -2695,6 +2799,15 @@ dependencies = [
+  "winapi-util",
+ ]
+ 
++[[package]]
++name = "schannel"
++version = "0.1.29"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
++dependencies = [
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "schemars"
+ version = "0.8.22"
+@@ -2752,6 +2865,29 @@ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+ 
++[[package]]
++name = "security-framework"
++version = "3.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
++dependencies = [
++ "bitflags 2.13.2",
++ "core-foundation",
++ "core-foundation-sys",
++ "libc",
++ "security-framework-sys",
++]
++
++[[package]]
++name = "security-framework-sys"
++version = "2.17.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6ce2691df843ecc5d231c0b14ece2acc3efb62c0a398c7e1d875f3983ce020e3"
++dependencies = [
++ "core-foundation-sys",
++ "libc",
++]
++
+ [[package]]
+ name = "selectors"
+ version = "0.36.1"
+@@ -3033,13 +3169,16 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
+ name = "smartgastos"
+ version = "1.0.0"
+ dependencies = [
++ "flate2",
+  "serde",
+  "serde_json",
+  "sysinfo",
++ "tar",
+  "tauri",
+  "tauri-build",
+  "tauri-plugin-shell",
+  "ureq",
++ "zip",
+ ]
+ 
+ [[package]]
+@@ -3277,6 +3416,17 @@ dependencies = [
+  "syn 2.0.119",
+ ]
+ 
++[[package]]
++name = "tar"
++version = "0.4.46"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
++dependencies = [
++ "filetime",
++ "libc",
++ "xattr",
++]
++
+ [[package]]
+ name = "target-lexicon"
+ version = "0.12.16"
+@@ -3533,6 +3683,19 @@ dependencies = [
+  "toml 1.1.6+spec-1.1.0",
+ ]
+ 
++[[package]]
++name = "tempfile"
++version = "3.27.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
++dependencies = [
++ "fastrand",
++ "getrandom 0.4.3",
++ "once_cell",
++ "rustix",
++ "windows-sys 0.61.2",
++]
++
+ [[package]]
+ name = "tendril"
+ version = "0.5.1"
+@@ -3949,6 +4112,7 @@ checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+ dependencies = [
+  "base64 0.22.1",
+  "log",
++ "native-tls",
+  "once_cell",
+  "url",
+ ]
+@@ -3996,6 +4160,12 @@ dependencies = [
+  "wasm-bindgen",
+ ]
+ 
++[[package]]
++name = "vcpkg"
++version = "0.2.15"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
++
+ [[package]]
+ name = "version-compare"
+ version = "0.2.1"
+@@ -4747,6 +4917,16 @@ dependencies = [
+  "pkg-config",
+ ]
+ 
++[[package]]
++name = "xattr"
++version = "1.6.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
++dependencies = [
++ "libc",
++ "rustix",
++]
++
+ [[package]]
+ name = "yoke"
+ version = "0.8.3"
+@@ -4824,6 +5004,18 @@ dependencies = [
+  "syn 3.0.5",
+ ]
+ 
++[[package]]
++name = "zip"
++version = "0.6.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "760394e246e4c28189f19d488c058bf16f564016aefac5d32bb1f3b51d5e9261"
++dependencies = [
++ "byteorder",
++ "crc32fast",
++ "crossbeam-utils",
++ "flate2",
++]
++
+ [[package]]
+ name = "zlib-rs"
+ version = "0.6.7"
+diff --git a/desktop/src-tauri/Cargo.toml b/desktop/src-tauri/Cargo.toml
+index 0dc3da6..bdba719 100644
+--- a/desktop/src-tauri/Cargo.toml
++++ b/desktop/src-tauri/Cargo.toml
+@@ -15,7 +15,10 @@ tauri-plugin-shell = "2"
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ sysinfo = "0.33"
+-ureq = { version = "2", default-features = false }
++ureq = { version = "2.12.1", default-features = false, features = ["native-tls"] }
++zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
++tar = "0.4.43"
++flate2 = { version = "1.0.35", default-features = false, features = ["rust_backend"] }
+ 
+ [[bin]]
+ name = "smartgastos"
+diff --git a/desktop/src-tauri/src/main.rs b/desktop/src-tauri/src/main.rs
+index 13260f5..c808dce 100644
+--- a/desktop/src-tauri/src/main.rs
++++ b/desktop/src-tauri/src/main.rs
+@@ -4,23 +4,19 @@
+     windows_subsystem = "windows"
+ )]
+ 
+-use std::io::{BufRead, Write};
+-use std::net::{TcpListener, TcpStream};
++use std::io::Write;
++use std::net::TcpListener;
+ use std::path::PathBuf;
+-use std::process::{Child, Command, Stdio};
++use std::process::Child;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::sync::{Mutex, OnceLock};
+ use std::time::Duration;
+ 
+-#[cfg(windows)]
+-use std::os::windows::process::CommandExt;
+-
+ use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
+ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+ use tauri_plugin_shell::ShellExt;
+ 
+-#[cfg(windows)]
+-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
++mod ollama;
+ 
+ #[derive(serde::Deserialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -52,6 +48,9 @@ struct OllamaState(Mutex<Option<Child>>);
+ struct ShutdownState(AtomicBool);
+ struct Navigated(Mutex<bool>);
+ struct LastProbe(Mutex<String>);
++/// Puerto HTTP de Ollama para esta sesión (11434 u otro loopback).
++#[allow(dead_code)]
++struct OllamaListenPort(u16);
+ 
+ #[derive(Clone, serde::Serialize)]
+ #[serde(rename_all = "camelCase")]
+@@ -129,14 +128,6 @@ fn retry_backend(app: tauri::AppHandle, port: tauri::State<BackendPort>) -> Resu
+     }
+ }
+ 
+-fn ollama_command() -> Command {
+-    #[allow(unused_mut)]
+-    let mut cmd = Command::new("ollama");
+-    #[cfg(windows)]
+-    cmd.creation_flags(CREATE_NO_WINDOW);
+-    cmd
+-}
+-
+ fn home_dir() -> PathBuf {
+     #[cfg(windows)]
+     {
+@@ -219,14 +210,14 @@ fn kill_ollama_child(state: &OllamaState) {
+         slot.take()
+     };
+     if let Some(mut child) = child {
+-        ollama_log("kill_ollama_child: terminando Ollama iniciado por esta app");
+-        match child.kill() {
+-            Ok(()) => {
+-                let _ = child.wait();
+-                ollama_log("kill_ollama_child: OK");
+-            }
+-            Err(e) => ollama_log(&format!("kill_ollama_child: {}", e)),
+-        }
++        let pid = child.id();
++        ollama_log(&format!(
++            "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
++            pid
++        ));
++        ollama::kill_owned_child(&mut child);
++        ollama::clear_owned_pid(&user_data_dir());
++        ollama_log("kill_ollama_child: OK");
+     }
+ }
+ 
+@@ -258,16 +249,6 @@ fn pick_port() -> u16 {
+         .unwrap_or(7860)
+ }
+ 
+-fn wait_for_port(port: u16, attempts: u32) -> bool {
+-    for _ in 0..attempts {
+-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+-            return true;
+-        }
+-        std::thread::sleep(Duration::from_millis(500));
+-    }
+-    false
+-}
+-
+ fn backend_app_url(port: u16) -> String {
+     format!("http://127.0.0.1:{}/", port)
+ }
+@@ -408,10 +389,10 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
+         s.backend_url = Some(url);
+         s.can_continue = true;
+         s.backend_error = None;
+-        s.phase = "ready".into();
+-        if s.message.starts_with("Descargando") || s.message.starts_with("Componente") {
+-            s.message = "Servicios listos.".into();
++        if s.ollama_done {
++            s.phase = "ready".into();
+         }
++        // No pisar el progreso de descarga/extracción/arranque/pull de Ollama.
+     });
+ }
+ 
+@@ -471,56 +452,40 @@ fn model_for_ram() -> String {
+         .unwrap_or_else(|| "llama3.2:3b".to_string())
+ }
+ 
+-fn pull_model_with_progress(app: &tauri::AppHandle, model: &str) -> bool {
+-    let body = format!("{{\"name\":\"{}\"}}", model);
+-    let resp = ureq::post("http://127.0.0.1:11434/api/pull")
+-        .set("Content-Type", "application/json")
+-        .send_string(&body);
+-    let resp = match resp {
+-        Ok(r) => r,
+-        Err(_) => return false,
+-    };
+-    let reader = std::io::BufReader::new(resp.into_reader());
+-    let mut ok = false;
+-    for line in reader.lines() {
+-        let line = match line {
+-            Ok(l) => l,
+-            Err(_) => break,
+-        };
+-        if line.trim().is_empty() {
+-            continue;
+-        }
+-        let v: serde_json::Value = match serde_json::from_str(&line) {
+-            Ok(v) => v,
+-            Err(_) => continue,
+-        };
+-        if v.get("error").is_some() {
+-            ok = false;
+-            break;
+-        }
+-        let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
+-        let total = v.get("total").and_then(|t| t.as_u64());
+-        let completed = v.get("completed").and_then(|c| c.as_u64());
+-        let pct: i32 = match (total, completed) {
+-            (Some(t), Some(c)) if t > 0 => ((c.min(t) * 100) / t) as i32,
+-            _ => -1,
+-        };
+-        let msg = if pct >= 0 {
+-            format!("Descargando el modelo {} - {}%", model, pct)
+-        } else {
+-            format!("Preparando el modelo {} ({})...", model, status)
+-        };
+-        ollama_log(&msg);
+-        update_status(app, |s| {
+-            s.phase = "downloading".into();
+-            s.message = msg.clone();
+-            s.percent = pct;
+-        });
+-        if status == "success" {
+-            ok = true;
+-        }
++fn status_progress(app: &tauri::AppHandle, phase: &str, percent: i32, message: &str) {
++    ollama_log(message);
++    update_status(app, |s| {
++        s.phase = phase.into();
++        s.message = message.into();
++        s.percent = percent;
++    });
++}
++
++fn take_owned_slot(app: &tauri::AppHandle, mut child: Child) -> bool {
++    let pid = child.id();
++    let ollama_state = app.state::<OllamaState>();
++    let mut slot = ollama_state.0.lock().unwrap();
++    if shutdown_requested(app) {
++        drop(slot);
++        ollama::kill_owned_child(&mut child);
++        ollama::clear_owned_pid(&user_data_dir());
++        return false;
++    }
++    if let Some(mut previous) = slot.replace(child) {
++        ollama::kill_owned_child(&mut previous);
+     }
+-    ok
++    ollama::record_owned_pid(&user_data_dir(), pid);
++    ollama_log(&format!(
++        "Ollama portable iniciado por esta instancia (pid={})",
++        pid
++    ));
++    true
++}
++
++fn pull_model_with_progress(app: &tauri::AppHandle, port: u16, model: &str) -> bool {
++    ollama::pull_model(port, model, |pct, msg| {
++        status_progress(app, "downloading", pct, msg);
++    })
+ }
+ 
+ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
+@@ -547,70 +512,117 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
+     ollama_log("ollama_done=true; splash debe hacer location.replace('/') via /api/desktop-status");
+ }
+ 
+-fn bootstrap_ollama(app: tauri::AppHandle, backend_port: u16) {
++fn bootstrap_ollama(
++    app: tauri::AppHandle,
++    backend_port: u16,
++    ollama_port: u16,
++    already_healthy: bool,
++) {
+     std::thread::spawn(move || {
+         if shutdown_requested(&app) {
+             return;
+         }
+-        update_status(&app, |s| {
+-            s.phase = "ollama".into();
+-            s.message = "Verificando el motor de IA (Ollama)...".into();
+-            s.percent = -1;
+-        });
++        status_progress(&app, "ollama", -1, "Verificando el motor de IA (Ollama)...");
+ 
+-        let installed = ollama_command()
+-            .arg("--version")
+-            .stdout(Stdio::null())
+-            .stderr(Stdio::null())
+-            .status()
+-            .map(|s| s.success())
+-            .unwrap_or(false);
+-        if !installed {
+-            finish_ollama_bootstrap(&app, backend_port);
+-            return;
+-        }
+-
+-        if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
+-            let mut cmd = ollama_command();
+-            cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
+-            match cmd.spawn() {
+-                Ok(mut child) => {
+-                    let ollama_state = app.state::<OllamaState>();
+-                    let mut slot = ollama_state.0.lock().unwrap();
++        let data_dir = user_data_dir();
++        if already_healthy {
++            ollama_log(&format!(
++                "Usando Ollama ya en marcha en {} (no se registra PID propio)",
++                ollama::api_base(ollama_port)
++            ));
++        } else {
++            match ollama::ensure_portable_binary(&data_dir, |pct, msg| {
++                let phase = if msg.starts_with("Extrayendo") {
++                    "extract"
++                } else {
++                    "download"
++                };
++                status_progress(&app, phase, pct, msg);
++            }) {
++                Ok(bin) => {
+                     if shutdown_requested(&app) {
+-                        drop(slot);
+-                        let _ = child.kill();
+-                        let _ = child.wait();
+                         return;
+                     }
+-                    if let Some(mut previous) = slot.replace(child) {
+-                        let _ = previous.kill();
+-                        let _ = previous.wait();
++                    if ollama::api_healthy(ollama_port) {
++                        ollama_log(
++                            "Ollama respondio en el puerto elegido antes de spawn; no se toma PID",
++                        );
++                    } else {
++                        status_progress(&app, "start", -1, "Iniciando el servicio de IA...");
++                        match ollama::spawn_serve(&bin, ollama_port, &ollama::models_dir(&data_dir))
++                        {
++                            Ok(child) => {
++                                if !take_owned_slot(&app, child) {
++                                    return;
++                                }
++                            }
++                            Err(e) => {
++                                ollama_log(&format!("No se pudo iniciar Ollama portable: {}", e));
++                                status_progress(
++                                    &app,
++                                    "warning",
++                                    -1,
++                                    "No se pudo iniciar Ollama. La app continuara sin IA.",
++                                );
++                                finish_ollama_bootstrap(&app, backend_port);
++                                return;
++                            }
++                        }
++                        if !ollama::wait_until_healthy(ollama_port, 60) {
++                            ollama_log("Ollama portable no respondio a /api/tags");
++                            status_progress(
++                                &app,
++                                "warning",
++                                -1,
++                                "Ollama no respondio a tiempo. La app continuara sin IA.",
++                            );
++                            finish_ollama_bootstrap(&app, backend_port);
++                            return;
++                        }
++                        ollama_log(&format!(
++                            "Ollama portable listo en {}",
++                            ollama::api_base(ollama_port)
++                        ));
+                     }
+-                    ollama_log("Ollama iniciado por esta instancia");
+                 }
+                 Err(e) => {
+-                    ollama_log(&format!("No se pudo iniciar Ollama: {}", e));
++                    ollama_log(&format!("Ollama portable no disponible: {}", e));
++                    status_progress(
++                        &app,
++                        "warning",
++                        -1,
++                        "No se pudo descargar Ollama. La app continuara sin IA.",
++                    );
+                     finish_ollama_bootstrap(&app, backend_port);
+                     return;
+                 }
+             }
+-            wait_for_port(11434, 30);
+         }
+ 
+         if shutdown_requested(&app) {
+             return;
+         }
++        if !ollama::api_healthy(ollama_port) {
++            ollama_log("API de Ollama no saludable; se omite pull");
++            finish_ollama_bootstrap(&app, backend_port);
++            return;
++        }
++
+         let model = model_for_ram();
+-        pull_model_with_progress(&app, &model);
++        let _ = pull_model_with_progress(&app, ollama_port, &model);
+ 
+         for extra in &app_config().extra_models {
+-            pull_model_with_progress(&app, extra);
++            if shutdown_requested(&app) {
++                return;
++            }
++            let _ = pull_model_with_progress(&app, ollama_port, extra);
+             ollama_log(&format!("Modelo adicional '{}' listo.", extra));
+-            update_status(&app, |s| {
+-                s.message = format!("Componente {} listo.", extra);
+-                s.percent = 100;
+-            });
++            status_progress(
++                &app,
++                "downloading",
++                100,
++                &format!("Componente {} listo.", extra),
++            );
+         }
+ 
+         ollama_log("extra_models terminado; entrando a finish_ollama_bootstrap");
+@@ -643,11 +655,21 @@ fn main() {
+             app.manage(BackendPort(port));
+             ollama_log(&format!("Puerto backend elegido: {}", port));
+ 
++            let (ollama_port, ollama_already_healthy) = ollama::decide_listen_port();
++            app.manage(OllamaListenPort(ollama_port));
++            ollama_log(&format!(
++                "Ollama HTTP {} (ya saludable={})",
++                ollama::api_base(ollama_port),
++                ollama_already_healthy
++            ));
++
+             let data_dir = user_data_dir().to_string_lossy().to_string();
+             let backend_state = app.state::<BackendState>();
+             if backend_state.0.lock().unwrap().is_some() {
+                 ollama_log("WARN: sidecar ya registrado; omitiendo segundo spawn");
+             }
++            let ollama_url = ollama::api_base(ollama_port);
++            let ollama_host = format!("127.0.0.1:{}", ollama_port);
+             let sidecar = app.shell().sidecar("backend");
+             match sidecar {
+                 Ok(cmd) => match cmd
+@@ -655,6 +677,8 @@ fn main() {
+                     .env("DATA_DIR", data_dir)
+                     .env("RUN_BY_TAURI", "1")
+                     .env("PYTHONIOENCODING", "utf-8")
++                    .env("OLLAMA_URL", ollama_url)
++                    .env("OLLAMA_HOST", ollama_host)
+                     .spawn()
+                 {
+                     Ok((mut rx, child)) => {
+@@ -723,7 +747,7 @@ fn main() {
+                 }
+             });
+ 
+-            bootstrap_ollama(handle.clone(), port);
++            bootstrap_ollama(handle.clone(), port, ollama_port, ollama_already_healthy);
+ 
+             let ready_handle = handle.clone();
+             std::thread::spawn(move || {
+diff --git a/desktop/src-tauri/src/ollama.rs b/desktop/src-tauri/src/ollama.rs
+new file mode 100644
+index 0000000..0eee902
+--- /dev/null
++++ b/desktop/src-tauri/src/ollama.rs
+@@ -0,0 +1,551 @@
++//! Portable in-app Ollama: reuse a healthy system daemon on 11434, otherwise
++//! download the official zip/tgz into the product data dir, start `serve`,
++//! and pull models. Never runs the Windows MSI / system installer.
++
++use std::fs::{self, File};
++use std::io::{self, Read, Write};
++use std::net::{TcpListener, TcpStream};
++use std::path::{Component, Path, PathBuf};
++use std::process::{Child, Command, Stdio};
++use std::time::Duration;
++
++#[cfg(unix)]
++use std::os::unix::process::CommandExt;
++#[cfg(windows)]
++use std::os::windows::process::CommandExt;
++
++#[cfg(windows)]
++const CREATE_NO_WINDOW: u32 = 0x0800_0000;
++#[cfg(windows)]
++const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
++
++pub const DEFAULT_PORT: u16 = 11434;
++const OWNED_PID_FILE: &str = "owned.pid";
++
++/// Official GitHub release assets (followed via HTTP redirects).
++#[allow(dead_code)]
++pub const WINDOWS_AMD64_ZIP: &str =
++    "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip";
++#[allow(dead_code)]
++pub const LINUX_AMD64_TGZ: &str =
++    "https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64.tgz";
++#[allow(dead_code)]
++pub const LINUX_ARM64_TGZ: &str =
++    "https://github.com/ollama/ollama/releases/latest/download/ollama-linux-arm64.tgz";
++#[allow(dead_code)]
++pub const DARWIN_TGZ: &str =
++    "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz";
++#[allow(dead_code)]
++pub const WINDOWS_AMD64_ZIP_FALLBACK: &str = "https://ollama.com/download/ollama-windows-amd64.zip";
++#[allow(dead_code)]
++pub const LINUX_AMD64_TGZ_FALLBACK: &str = "https://ollama.com/download/ollama-linux-amd64.tgz";
++
++pub fn ollama_home(data_dir: &Path) -> PathBuf {
++    data_dir.join("ollama")
++}
++
++pub fn models_dir(data_dir: &Path) -> PathBuf {
++    ollama_home(data_dir).join("models")
++}
++
++fn download_dir(data_dir: &Path) -> PathBuf {
++    ollama_home(data_dir).join("download")
++}
++
++fn owned_pid_path(data_dir: &Path) -> PathBuf {
++    ollama_home(data_dir).join(OWNED_PID_FILE)
++}
++
++pub fn record_owned_pid(data_dir: &Path, pid: u32) {
++    let home = ollama_home(data_dir);
++    let _ = fs::create_dir_all(&home);
++    let _ = fs::write(owned_pid_path(data_dir), pid.to_string());
++}
++
++pub fn clear_owned_pid(data_dir: &Path) {
++    let _ = fs::remove_file(owned_pid_path(data_dir));
++}
++
++pub fn api_base(port: u16) -> String {
++    format!("http://127.0.0.1:{}", port)
++}
++
++fn http_agent() -> ureq::Agent {
++    ureq::AgentBuilder::new()
++        .timeout_connect(Duration::from_secs(30))
++        .timeout_read(Duration::from_secs(120))
++        .timeout(Duration::from_secs(6 * 3600))
++        .build()
++}
++
++pub fn api_healthy(port: u16) -> bool {
++    let url = format!("{}/api/tags", api_base(port));
++    match ureq::AgentBuilder::new()
++        .timeout(Duration::from_secs(3))
++        .build()
++        .get(&url)
++        .call()
++    {
++        Ok(r) => r.status() == 200,
++        Err(_) => false,
++    }
++}
++
++fn tcp_open(port: u16) -> bool {
++    TcpStream::connect(("127.0.0.1", port)).is_ok()
++}
++
++fn port_bindable(port: u16) -> bool {
++    TcpListener::bind(("127.0.0.1", port)).is_ok()
++}
++
++/// Prefer a healthy system Ollama on 11434. Otherwise pick 11434 if free, else
++/// another loopback port for the portable `serve`.
++pub fn decide_listen_port() -> (u16, bool) {
++    if api_healthy(DEFAULT_PORT) {
++        return (DEFAULT_PORT, true);
++    }
++    if tcp_open(DEFAULT_PORT) {
++        for _ in 0..6 {
++            std::thread::sleep(Duration::from_millis(500));
++            if api_healthy(DEFAULT_PORT) {
++                return (DEFAULT_PORT, true);
++            }
++        }
++        return (pick_alternate_port(), false);
++    }
++    (DEFAULT_PORT, false)
++}
++
++fn pick_alternate_port() -> u16 {
++    for p in 11435u16..=11450 {
++        if port_bindable(p) {
++            return p;
++        }
++    }
++    TcpListener::bind(("127.0.0.1", 0))
++        .and_then(|l| l.local_addr())
++        .map(|a| a.port())
++        .unwrap_or(11435)
++}
++
++pub fn wait_until_healthy(port: u16, attempts: u32) -> bool {
++    for _ in 0..attempts {
++        if api_healthy(port) {
++            return true;
++        }
++        std::thread::sleep(Duration::from_millis(500));
++    }
++    false
++}
++
++pub fn binary_name() -> &'static str {
++    if cfg!(windows) {
++        "ollama.exe"
++    } else {
++        "ollama"
++    }
++}
++
++pub fn find_portable_binary(data_dir: &Path) -> Option<PathBuf> {
++    let home = ollama_home(data_dir);
++    if !home.is_dir() {
++        return None;
++    }
++    find_named(&home, binary_name(), 4)
++}
++
++fn find_named(dir: &Path, want: &str, depth: u8) -> Option<PathBuf> {
++    if depth == 0 {
++        return None;
++    }
++    let direct = dir.join(want);
++    if direct.is_file() {
++        return Some(direct);
++    }
++    let rd = fs::read_dir(dir).ok()?;
++    for ent in rd.flatten() {
++        let p = ent.path();
++        if p.is_dir() {
++            if let Some(found) = find_named(&p, want, depth - 1) {
++                return Some(found);
++            }
++        } else if p.file_name().map(|n| n == want).unwrap_or(false) {
++            return Some(p);
++        }
++    }
++    None
++}
++
++struct ArchiveSpec {
++    url: &'static str,
++    fallback: Option<&'static str>,
++    filename: &'static str,
++    kind: ArchiveKind,
++}
++
++enum ArchiveKind {
++    Zip,
++    Tgz,
++}
++
++fn archive_for_host() -> Result<ArchiveSpec, String> {
++    #[cfg(all(windows, target_arch = "x86_64"))]
++    {
++        return Ok(ArchiveSpec {
++            url: WINDOWS_AMD64_ZIP,
++            fallback: Some(WINDOWS_AMD64_ZIP_FALLBACK),
++            filename: "ollama-windows-amd64.zip",
++            kind: ArchiveKind::Zip,
++        });
++    }
++    #[cfg(all(windows, target_arch = "aarch64"))]
++    {
++        return Ok(ArchiveSpec {
++            url:
++                "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-arm64.zip",
++            fallback: None,
++            filename: "ollama-windows-arm64.zip",
++            kind: ArchiveKind::Zip,
++        });
++    }
++    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
++    {
++        return Ok(ArchiveSpec {
++            url: LINUX_AMD64_TGZ,
++            fallback: Some(LINUX_AMD64_TGZ_FALLBACK),
++            filename: "ollama-linux-amd64.tgz",
++            kind: ArchiveKind::Tgz,
++        });
++    }
++    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
++    {
++        return Ok(ArchiveSpec {
++            url: LINUX_ARM64_TGZ,
++            fallback: None,
++            filename: "ollama-linux-arm64.tgz",
++            kind: ArchiveKind::Tgz,
++        });
++    }
++    #[cfg(target_os = "macos")]
++    {
++        return Ok(ArchiveSpec {
++            url: DARWIN_TGZ,
++            fallback: None,
++            filename: "ollama-darwin.tgz",
++            kind: ArchiveKind::Tgz,
++        });
++    }
++    #[allow(unreachable_code)]
++    Err("No hay paquete portable de Ollama para esta arquitectura.".into())
++}
++
++pub fn ensure_portable_binary(
++    data_dir: &Path,
++    mut progress: impl FnMut(i32, &str),
++) -> Result<PathBuf, String> {
++    if let Some(existing) = find_portable_binary(data_dir) {
++        return Ok(existing);
++    }
++    let spec = archive_for_host()?;
++    let dl = download_dir(data_dir);
++    fs::create_dir_all(&dl).map_err(|e| format!("No se pudo crear {}: {}", dl.display(), e))?;
++    let archive_path = dl.join(spec.filename);
++    let mut last_err = String::new();
++    let mut downloaded = false;
++    for url in [Some(spec.url), spec.fallback].into_iter().flatten() {
++        progress(-1, "Descargando Ollama (copia portable)...");
++        match download_file(url, &archive_path, &mut progress) {
++            Ok(()) => {
++                downloaded = true;
++                break;
++            }
++            Err(e) => {
++                last_err = format!("{}: {}", url, e);
++            }
++        }
++    }
++    if !downloaded {
++        return Err(format!("No se pudo descargar Ollama ({})", last_err));
++    }
++    progress(0, "Extrayendo Ollama...");
++    let home = ollama_home(data_dir);
++    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
++    match spec.kind {
++        ArchiveKind::Zip => extract_zip(&archive_path, &home, &mut progress)?,
++        ArchiveKind::Tgz => extract_tgz(&archive_path, &home, &mut progress)?,
++    }
++    let _ = fs::remove_file(&archive_path);
++    let bin = find_portable_binary(data_dir).ok_or_else(|| {
++        format!(
++            "El archivo se extrajo en {} pero no aparece {}",
++            home.display(),
++            binary_name()
++        )
++    })?;
++    ensure_executable(&bin);
++    Ok(bin)
++}
++
++fn ensure_executable(path: &Path) {
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::PermissionsExt;
++        if let Ok(meta) = fs::metadata(path) {
++            let mut perms = meta.permissions();
++            perms.set_mode(perms.mode() | 0o755);
++            let _ = fs::set_permissions(path, perms);
++        }
++    }
++    #[cfg(not(unix))]
++    let _ = path;
++}
++
++fn download_file(
++    url: &str,
++    dest: &Path,
++    progress: &mut impl FnMut(i32, &str),
++) -> Result<(), String> {
++    let resp = http_agent()
++        .get(url)
++        .call()
++        .map_err(|e| format!("HTTP: {}", e))?;
++    if resp.status() < 200 || resp.status() >= 300 {
++        return Err(format!("HTTP {}", resp.status()));
++    }
++    let total = resp
++        .header("Content-Length")
++        .and_then(|s| s.parse::<u64>().ok())
++        .unwrap_or(0);
++    let mut reader = resp.into_reader();
++    let tmp = dest.with_extension("part");
++    let mut file =
++        File::create(&tmp).map_err(|e| format!("No se pudo crear {}: {}", tmp.display(), e))?;
++    let mut buf = [0u8; 64 * 1024];
++    let mut copied: u64 = 0;
++    let mut last_pct: i32 = -1;
++    loop {
++        let n = reader
++            .read(&mut buf)
++            .map_err(|e| format!("lectura: {}", e))?;
++        if n == 0 {
++            break;
++        }
++        file.write_all(&buf[..n])
++            .map_err(|e| format!("escritura: {}", e))?;
++        copied += n as u64;
++        if total > 0 {
++            let pct = ((copied.min(total) * 100) / total) as i32;
++            if pct != last_pct {
++                last_pct = pct;
++                progress(
++                    pct,
++                    &format!("Descargando Ollama (copia portable) — {}%", pct),
++                );
++            }
++        }
++    }
++    file.flush().map_err(|e| e.to_string())?;
++    drop(file);
++    fs::rename(&tmp, dest).map_err(|e| format!("rename: {}", e))?;
++    Ok(())
++}
++
++fn safe_join(dest: &Path, name: &Path) -> Option<PathBuf> {
++    if name.is_absolute() {
++        return None;
++    }
++    if name.components().any(|c| matches!(c, Component::ParentDir)) {
++        return None;
++    }
++    Some(dest.join(name))
++}
++
++fn extract_zip(
++    zip_path: &Path,
++    dest: &Path,
++    progress: &mut impl FnMut(i32, &str),
++) -> Result<(), String> {
++    let file = File::open(zip_path).map_err(|e| e.to_string())?;
++    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("zip: {}", e))?;
++    let n = archive.len().max(1);
++    for i in 0..archive.len() {
++        let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
++        let rel = entry.mangled_name();
++        let out = match safe_join(dest, &rel) {
++            Some(p) => p,
++            None => continue,
++        };
++        if entry.is_dir() || rel.as_os_str().to_string_lossy().ends_with('/') {
++            fs::create_dir_all(&out).map_err(|e| e.to_string())?;
++        } else {
++            if let Some(parent) = out.parent() {
++                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
++            }
++            let mut outfile = File::create(&out).map_err(|e| e.to_string())?;
++            io::copy(&mut entry, &mut outfile).map_err(|e| e.to_string())?;
++            #[cfg(unix)]
++            {
++                use std::os::unix::fs::PermissionsExt;
++                if let Some(mode) = entry.unix_mode() {
++                    let _ = fs::set_permissions(&out, fs::Permissions::from_mode(mode));
++                }
++            }
++        }
++        let pct = (((i + 1) * 100) / n) as i32;
++        progress(pct, &format!("Extrayendo Ollama — {}%", pct));
++    }
++    Ok(())
++}
++
++fn extract_tgz(
++    tgz_path: &Path,
++    dest: &Path,
++    progress: &mut impl FnMut(i32, &str),
++) -> Result<(), String> {
++    let file = File::open(tgz_path).map_err(|e| e.to_string())?;
++    let gz = flate2::read::GzDecoder::new(file);
++    let mut archive = tar::Archive::new(gz);
++    let entries = archive.entries().map_err(|e| format!("tar: {}", e))?;
++    let mut i = 0u64;
++    for entry in entries {
++        let mut entry = entry.map_err(|e| e.to_string())?;
++        let rel = entry.path().map_err(|e| e.to_string())?.into_owned();
++        if safe_join(dest, &rel).is_none() {
++            continue;
++        }
++        entry.unpack_in(dest).map_err(|e| e.to_string())?;
++        i += 1;
++        if i == 1 || i % 8 == 0 {
++            progress(-1, &format!("Extrayendo Ollama ({} archivos)...", i));
++        }
++    }
++    progress(100, "Extrayendo Ollama — 100%");
++    Ok(())
++}
++
++pub fn spawn_serve(bin: &Path, port: u16, models: &Path) -> io::Result<Child> {
++    let _ = fs::create_dir_all(models);
++    let host = format!("127.0.0.1:{}", port);
++    let mut cmd = Command::new(bin);
++    cmd.arg("serve")
++        .env("OLLAMA_HOST", &host)
++        .env("OLLAMA_MODELS", models)
++        .stdout(Stdio::null())
++        .stderr(Stdio::null());
++    if let Some(dir) = bin.parent() {
++        cmd.current_dir(dir);
++    }
++    #[cfg(windows)]
++    {
++        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
++    }
++    #[cfg(unix)]
++    {
++        cmd.process_group(0);
++    }
++    cmd.spawn()
++}
++
++/// Kill only the process tree of an Ollama we spawned. Never kill by process name.
++pub fn kill_owned_child(child: &mut Child) {
++    let pid = child.id();
++    #[cfg(windows)]
++    {
++        let mut killer = Command::new("taskkill");
++        killer
++            .args(["/PID", &pid.to_string(), "/T", "/F"])
++            .stdout(Stdio::null())
++            .stderr(Stdio::null());
++        killer.creation_flags(CREATE_NO_WINDOW);
++        let _ = killer.status();
++    }
++    #[cfg(unix)]
++    {
++        let pg = format!("-{}", pid);
++        let _ = Command::new("kill")
++            .args(["-TERM", &pg])
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .status();
++        std::thread::sleep(Duration::from_millis(400));
++        let _ = Command::new("kill")
++            .args(["-KILL", &pg])
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .status();
++    }
++    let _ = child.kill();
++    let _ = child.wait();
++}
++
++pub fn model_is_present(port: u16, model: &str) -> bool {
++    let url = format!("{}/api/tags", api_base(port));
++    let Ok(resp) = ureq::AgentBuilder::new()
++        .timeout(Duration::from_secs(5))
++        .build()
++        .get(&url)
++        .call()
++    else {
++        return false;
++    };
++    let Ok(body) = resp.into_string() else {
++        return false;
++    };
++    let needle = format!("\"name\":\"{}\"", model);
++    let needle_sp = format!("\"name\": \"{}\"", model);
++    body.contains(&needle) || body.contains(&needle_sp)
++}
++
++pub fn pull_model(port: u16, model: &str, mut progress: impl FnMut(i32, &str)) -> bool {
++    if model_is_present(port, model) {
++        progress(100, &format!("Modelo {} ya estaba disponible.", model));
++        return true;
++    }
++    let body = format!("{{\"name\":\"{}\"}}", model);
++    let url = format!("{}/api/pull", api_base(port));
++    let resp = http_agent()
++        .post(&url)
++        .set("Content-Type", "application/json")
++        .send_string(&body);
++    let resp = match resp {
++        Ok(r) => r,
++        Err(_) => return false,
++    };
++    let reader = std::io::BufReader::new(resp.into_reader());
++    let mut ok = false;
++    for line in std::io::BufRead::lines(reader) {
++        let line = match line {
++            Ok(l) => l,
++            Err(_) => break,
++        };
++        if line.trim().is_empty() {
++            continue;
++        }
++        let v: serde_json::Value = match serde_json::from_str(&line) {
++            Ok(v) => v,
++            Err(_) => continue,
++        };
++        if v.get("error").is_some() {
++            ok = false;
++            break;
++        }
++        let status = v.get("status").and_then(|s| s.as_str()).unwrap_or("");
++        let total = v.get("total").and_then(|t| t.as_u64());
++        let completed = v.get("completed").and_then(|c| c.as_u64());
++        let pct: i32 = match (total, completed) {
++            (Some(t), Some(c)) if t > 0 => ((c.min(t) * 100) / t) as i32,
++            _ => -1,
++        };
++        let msg = if pct >= 0 {
++            format!("Descargando el modelo {} — {}%", model, pct)
++        } else {
++            format!("Preparando el modelo {} ({})...", model, status)
++        };
++        progress(pct, &msg);
++        if status == "success" {
++            ok = true;
++        }
++    }
++    ok
++}
+diff --git a/desktop/ui/index.html b/desktop/ui/index.html
+index de18ae0..f5425b6 100644
+--- a/desktop/ui/index.html
++++ b/desktop/ui/index.html
+@@ -144,7 +144,7 @@
+ 
+     if (onBackendSplash) {
+       pollHttpStatus();
+-      setInterval(pollHttpStatus, 1000);
++      setInterval(pollHttpStatus, 400);
+     } else {
+       function initTauri() {
+         const t = window.__TAURI__;
+diff --git a/desktop/ui/splash.template.html b/desktop/ui/splash.template.html
+index 7f91f9f..5a8794a 100644
+--- a/desktop/ui/splash.template.html
++++ b/desktop/ui/splash.template.html
+@@ -143,7 +143,7 @@
+ 
+     if (onBackendSplash) {
+       pollHttpStatus();
+-      setInterval(pollHttpStatus, 1000);
++      setInterval(pollHttpStatus, 400);
+     } else {
+       function initTauri() {
+         const t = window.__TAURI__;
+diff --git a/tests/test_pinokio_config.py b/tests/test_pinokio_config.py
+index 1e0ea3f..a9b7cfa 100644
+--- a/tests/test_pinokio_config.py
++++ b/tests/test_pinokio_config.py
+@@ -316,5 +316,71 @@ class TestUIFiles(unittest.TestCase):
+         self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
+ 
+ 
++class TestPortableOllama(unittest.TestCase):
++    """La app de escritorio descarga Ollama portable; no usa MSI ni torch/OCR extra."""
++
++    def setUp(self):
++        src = REPO_ROOT / "desktop" / "src-tauri" / "src"
++        self.main = (src / "main.rs").read_text(encoding="utf-8")
++        self.ollama = (src / "ollama.rs").read_text(encoding="utf-8")
++        self.joined = self.main + "\n" + self.ollama
++        self.splash = (REPO_ROOT / "desktop" / "ui" / "splash.template.html").read_text(
++            encoding="utf-8"
++        )
++
++    def test_downloads_official_windows_zip_and_linux_tgz(self):
++        self.assertIn("ollama-windows-amd64.zip", self.ollama)
++        self.assertIn("ollama-linux-amd64.tgz", self.ollama)
++        self.assertIn("releases/latest/download", self.ollama)
++
++    def test_never_runs_windows_system_installer(self):
++        lowered = self.joined.lower()
++        for banned in ("ollamasetup.exe", "winget", ".msi", "verysilent", "install.sh"):
++            self.assertNotIn(banned, lowered, f"no debe invocar instalador de sistema ({banned})")
++
++    def test_prefers_healthy_system_daemon_and_records_owned_pid(self):
++        self.assertIn("decide_listen_port", self.joined)
++        self.assertIn("api/tags", self.ollama)
++        self.assertIn("owned.pid", self.ollama)
++        self.assertIn("record_owned_pid", self.joined)
++        self.assertIn("kill_owned_child", self.joined)
++        self.assertNotIn("Command::new(\"pkill\")", self.joined)
++        self.assertNotIn("pkill -f", self.joined)
++
++    def test_sidecar_gets_ollama_url_and_continues_without_restart(self):
++        self.assertIn('env("OLLAMA_URL"', self.main)
++        self.assertIn("ensure_portable_binary", self.main)
++        self.assertIn("spawn_serve", self.main)
++        self.assertIn("finish_ollama_bootstrap", self.main)
++
++    def test_product_models_are_llama31_and_moondream(self):
++        import json
++        cfg = json.loads(
++            (REPO_ROOT / "desktop" / "smartsuite.config.json").read_text(encoding="utf-8")
++        )
++        extra = (cfg.get("ollama") or {}).get("extraModels") or []
++        tiers = (cfg.get("ollama") or {}).get("tiers") or []
++        self.assertIn("moondream", extra)
++        self.assertTrue(any(t.get("model") == "llama3.1:8b" for t in tiers))
++        self.assertIn("extra_models", self.main)
++        self.assertIn("model_for_ram", self.main)
++
++    def test_splash_shows_ollama_progress(self):
++        self.assertIn("/api/desktop-status", self.splash)
++        self.assertIn("s.message", self.splash)
++        self.assertIn("s.percent", self.splash)
++        self.assertIn("ollamaDone", self.splash)
++
++    def test_desktop_requirements_still_exclude_easyocr_torch(self):
++        lines = [
++            ln.strip().lower()
++            for ln in (REPO_ROOT / "requirements-desktop.txt").read_text(encoding="utf-8").splitlines()
++            if ln.strip() and not ln.strip().startswith("#")
++        ]
++        joined = "\n".join(lines)
++        self.assertNotIn("easyocr", joined)
++        self.assertNotIn("torch", joined)
++
++
+ if __name__ == '__main__':
+     unittest.main()
+-- 
+2.43.0
+
