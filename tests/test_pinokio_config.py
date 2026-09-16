@@ -255,15 +255,24 @@ class TestUIFiles(unittest.TestCase):
     def test_icon_exists(self):
         self.assertTrue((REPO_ROOT / "icon.png").exists())
 
+    def test_favicon_exists(self):
+        self.assertTrue((REPO_ROOT / "app" / "favicon.ico").exists())
+        self.assertTrue((REPO_ROOT / "desktop" / "src-tauri" / "icons" / "icon.ico").exists())
+
     def test_logo_exists(self):
-        """Debe existir el logo CCS o un logo legacy en app/."""
+        """Debe existir el wordmark CCS en color y el mark para iconos."""
         app_dir = REPO_ROOT / "app"
-        has_logo = (
+        self.assertTrue((app_dir / "logo-ccs.png").exists(), "Falta app/logo-ccs.png (wordmark color)")
+        self.assertTrue(
+            (REPO_ROOT / "desktop" / "brand" / "ccs-mark.png").exists(),
+            "Falta desktop/brand/ccs-mark.png (mark blanco sobre negro)",
+        )
+        has_legacy = (
             (app_dir / "logo-ccs.svg").exists()
             or (app_dir / "logo.svg").exists()
             or (app_dir / "logo.png").exists()
         )
-        self.assertTrue(has_logo, "Debe existir logo-ccs.svg, logo.svg o logo.png en app/")
+        self.assertTrue(has_legacy, "Debe existir logo-ccs.svg, logo.svg o logo.png en app/")
 
     def test_desktop_smartsuite_config(self):
         cfg_path = REPO_ROOT / "desktop" / "smartsuite.config.json"
@@ -274,10 +283,29 @@ class TestUIFiles(unittest.TestCase):
         self.assertEqual(cfg.get("productName"), "SmartGastos")
         self.assertEqual(cfg.get("identifier"), "cl.ccs.smartgastos")
         self.assertEqual(cfg.get("accent"), "#00D53A")
+<<<<<<< ours
+        self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.png")
+        extra = (cfg.get("ollama") or {}).get("extraModels") or []
+        self.assertIn("moondream", extra)
+
+    def test_ui_uses_ccs_png_wordmark_and_favicon(self):
+        index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('href="favicon.ico"', index)
+        self.assertIn("logo-ccs.png", index)
+        self.assertIn("ccs-about", index)
+        splash = (REPO_ROOT / "desktop" / "ui" / "splash.template.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("splash-mark", splash)
+        self.assertIn("splash-logo", splash)
+        self.assertIn('href="favicon.ico"', splash)
+
+=======
         self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.svg")
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
         self.assertIn("moondream", extra)
 
+>>>>>>> theirs
     def test_ccs_palette_is_applied_to_splash_and_installer_theme(self):
         expected_gradient = (
             "linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, "
@@ -315,6 +343,7 @@ class TestUIFiles(unittest.TestCase):
         setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
         self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
 
+<<<<<<< ours
 <<<<<<< ours
 
 class TestPortableOllama(unittest.TestCase):
@@ -382,6 +411,8 @@ class TestPortableOllama(unittest.TestCase):
         self.assertNotIn("easyocr", joined)
         self.assertNotIn("torch", joined)
 
+=======
+>>>>>>> theirs
 =======
 >>>>>>> theirs
 

@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>SmartGastos — Cámara de Comercio de Santiago (CCS)</title>
+<link rel="icon" href="favicon.ico" type="image/x-icon" />
 <script src="vendor/chart.umd.min.js"></script>
 <script src="vendor/purify.min.js"></script>
 <style>
@@ -148,6 +149,25 @@ a:hover { text-decoration: underline; }
   object-fit: contain;
   flex-shrink: 0;
 }
+.ccs-about {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.ccs-about-logo {
+  height: 44px;
+  width: auto;
+  max-width: 180px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.ccs-about-title { font-size: 14px; font-weight: 800; color: var(--ccs-azul-oscuro); }
+.ccs-about-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
 .sidebar-logo-divider {
   width: 1px;
   height: 28px;
@@ -968,6 +988,16 @@ a:hover { text-decoration: underline; }
   background: radial-gradient(circle, rgba(13,61,166,.2) 0%, transparent 70%);
   pointer-events: none;
 }
+.ob-hero-logo {
+  height: 48px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+  margin: 0 auto 14px;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
 .ob-hero-icon {
   font-size: 56px;
   margin-bottom: 14px;
@@ -1317,7 +1347,7 @@ a:hover { text-decoration: underline; }
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-logo">
-      <img src="logo-ccs.svg" alt="SmartGastos — CCS" class="sidebar-logo-img" />
+      <img src="logo-ccs.png" alt="SmartGastos — Cámara de Comercio de Santiago" class="sidebar-logo-img" />
       <div class="sidebar-logo-divider"></div>
       <div>
         <div class="logo-text">SmartGastos</div>
@@ -1966,8 +1996,8 @@ function showOnboarding() {
   document.getElementById('mainContent').innerHTML = `
     <div class="ob-wrap">
       <div class="ob-hero">
-        <span class="ob-hero-icon">📒</span>
-        <div class="ob-hero-title">Bienvenido a Ledger AI</div>
+        <img class="ob-hero-logo" src="logo-ccs.png" alt="Cámara de Comercio de Santiago" />
+        <div class="ob-hero-title">Bienvenido a SmartGastos</div>
         <div class="ob-hero-sub">
           Tu asistente de contabilidad con inteligencia artificial local.<br>
           Procesa facturas, clasifica gastos y analiza tus finanzas — todo offline.
@@ -4120,6 +4150,13 @@ async function renderAdmin() {
             onclick="addCategory()">+ Agregar</button>
         </div>
         <div id="adminCats">Cargando...</div>
+      </div>
+    </div>
+    <div class="ccs-about">
+      <img src="logo-ccs.png" alt="Cámara de Comercio de Santiago" class="ccs-about-logo" />
+      <div>
+        <div class="ccs-about-title">SmartGastos</div>
+        <div class="ccs-about-sub">Cámara de Comercio de Santiago (CCS) · IA local, 100% offline</div>
       </div>
     </div>
   `;

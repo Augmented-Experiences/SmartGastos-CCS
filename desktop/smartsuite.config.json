@@ -10,7 +10,7 @@
   "shortDescription": "Gestión de gastos/contabilidad con IA local (CCS)",
   "longDescription": "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS).",
   "splashSubtitle": "Preparando tu asistente de gastos y contabilidad con IA local...",
-  "splashLogo": "../app/logo-ccs.svg",
+  "splashLogo": "../app/logo-ccs.png",
   "ollama": {
     "tiers": [
       { "maxRamGb": 6, "model": "llama3.2:1b" },

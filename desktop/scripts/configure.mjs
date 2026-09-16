@@ -272,10 +272,28 @@ writeFileSync(
   `/* Generado por configure.mjs — acento por-herramienta */\n:root { --ccs-accent: ${accent}; }\n`
 );
 
+const favSrc = [
+  resolve(DESKTOP, "..", "app", "favicon.ico"),
+  resolve(DESKTOP, "src-tauri", "icons", "icon.ico"),
+].find((p) => existsSync(p));
+if (favSrc) {
+  copyFileSync(favSrc, resolve(DESKTOP, "ui/favicon.ico"));
+}
+
+const markSrc = [
+  resolve(DESKTOP, "brand/ccs-mark.png"),
+  resolve(DESKTOP, "..", "icon.png"),
+].find((p) => existsSync(p));
 let logoHtml = "";
-const logoRel = cfg.splashLogo || "../app/logo-ccs.svg";
+if (markSrc) {
+  copyFileSync(markSrc, resolve(DESKTOP, "ui/splash-mark.png"));
+  logoHtml += `<img class="splash-mark" src="splash-mark.png" alt="" />\n  `;
+}
+
+const logoRel = cfg.splashLogo || "../app/logo-ccs.png";
 const logoCandidates = [
   resolve(DESKTOP, logoRel),
+  resolve(DESKTOP, "..", "app", "logo-ccs.png"),
   resolve(DESKTOP, "..", "app", "logo-ccs.svg"),
   resolve(DESKTOP, "..", "icon.png"),
 ];
@@ -284,7 +302,7 @@ if (logoSrc) {
   const logoExtension = logoSrc.slice(logoSrc.lastIndexOf(".")) || ".png";
   const splashLogoFile = `splash-logo${logoExtension}`;
   copyFileSync(logoSrc, resolve(DESKTOP, "ui", splashLogoFile));
-  logoHtml = `<img class="splash-logo" src="${splashLogoFile}" alt="${escapeHtml(productName)}" />\n  `;
+  logoHtml += `<img class="splash-logo" src="${splashLogoFile}" alt="${escapeHtml(productName)}" />\n  `;
 }
 
 const splashTpl = readFileSync(resolve(DESKTOP, "ui/splash.template.html"), "utf8");

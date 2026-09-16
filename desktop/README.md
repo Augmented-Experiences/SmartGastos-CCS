@@ -51,7 +51,7 @@ Todo lo específico de cada app vive en `desktop/smartsuite.config.json`:
 
 ## Brand kit CCS (estilo compartido)
 
-`desktop/brand/` contiene `ccs-theme.css`, el tema reutilizable de la identidad CCS. El logo aprobado vive en `app/logo-ccs.svg`; `npm run icon` lo convierte en los iconos del instalador y el splash lo copia como SVG. Cualquier UI puede enlazar `ccs-theme.css` y usar las variables `--ccs-*`. Cada herramienta se diferencia con su `accent`.
+`desktop/brand/` contiene `ccs-theme.css`, el tema reutilizable de la identidad CCS. El wordmark color vive en `app/logo-ccs.png` (splash, header y about); el mark blanco sobre negro está en `desktop/brand/ccs-mark.png` y se usa para `icon.png`, `app/favicon.ico` e iconos Tauri (`npm run icon`). Cualquier UI puede enlazar `ccs-theme.css` y usar las variables `--ccs-*`. Cada herramienta se diferencia con su `accent`.
 
 ## Requisitos de build
 
@@ -80,7 +80,7 @@ Los instaladores quedan en `desktop/src-tauri/target/release/bundle/` (`.AppImag
 
 Como los repos son separados, se copia el kit a cada uno:
 
-1. Copia a la raíz del repo destino las carpetas `desktop/` y usa su propio `icon.png` (mismo logo CCS) en la raíz.
+1. Copia a la raíz del repo destino las carpetas `desktop/` y usa su propio `icon.png` (mark CCS blanco sobre negro) en la raíz.
 2. Sustituye `desktop/smartsuite.config.json` por el de la herramienta (hay ejemplos listos en `desktop/examples/smartredes.config.json` y `desktop/examples/smartgastos.config.json`).
 3. **Parche de `server/app.py` (2–3 líneas, retrocompatible con Pinokio):**
    - `BASE_DIR` debe apuntar al bundle cuando la app está empaquetada (para servir `app/` y `defaults/`):

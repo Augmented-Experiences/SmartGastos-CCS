@@ -82,10 +82,10 @@ Si prefieres dos pasos: ejecuta `build-backend.ps1` sin `-Installer`, luego `cd 
 Si prefieres no usar el `.patch`, en cada repo (SmartRedes/SmartGastos):
 1. Copia la carpeta `desktop/` del kit (del repo SmartCaja) a la raíz del repo.
 2. Copia `desktop/examples/<tool>.config.json` como `desktop/smartsuite.config.json`.
-3. Reemplaza `icon.png` de la raíz por el logo CCS.
+3. Reemplaza `icon.png` de la raíz por el mark CCS (blanco sobre negro).
 4. Aplica el parche de `server/app.py` (`smartredes_app_py.patch` / `smartgastos_app_py.patch`): `BASE_DIR` frozen-aware, `DATA_DIR` por env, y `import sys`.
 5. Crea `requirements-desktop.txt` (subconjunto liviano sin torch/easyocr/diffusers).
-6. Aplica el brand kit a la UI (`app/index.html`): variables `--ccs-*`, logo `logo-ccs.svg`, nombre de la herramienta.
+6. Aplica el brand kit a la UI (`app/index.html`): variables `--ccs-*`, wordmark `logo-ccs.png`, favicon, nombre de la herramienta.
 
 ---
 

@@ -6,7 +6,7 @@
   "scripts": {
     "tauri": "tauri",
     "configure": "node scripts/configure.mjs",
-    "icon": "tauri icon brand/logo-ccs-square.svg",
+    "icon": "tauri icon brand/ccs-mark.png",
     "build": "node scripts/configure.mjs && node scripts/tauri-build.mjs",
     "dev": "node scripts/configure.mjs && tauri dev"
   },

@@ -8,7 +8,11 @@ use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 <<<<<<< ours
+<<<<<<< ours
 use std::process::Child;
+=======
+use std::process::{Child, Command, Stdio};
+>>>>>>> theirs
 =======
 use std::process::{Child, Command, Stdio};
 >>>>>>> theirs
@@ -215,6 +219,7 @@ fn kill_ollama_child(state: &OllamaState) {
     };
     if let Some(mut child) = child {
 <<<<<<< ours
+<<<<<<< ours
         let pid = child.id();
         ollama_log(&format!(
             "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
@@ -224,6 +229,8 @@ fn kill_ollama_child(state: &OllamaState) {
         ollama::clear_owned_pid(&user_data_dir());
         ollama_log("kill_ollama_child: OK");
 =======
+=======
+>>>>>>> theirs
         ollama_log("kill_ollama_child: terminando Ollama iniciado por esta app");
         match child.kill() {
             Ok(()) => {
@@ -232,6 +239,9 @@ fn kill_ollama_child(state: &OllamaState) {
             }
             Err(e) => ollama_log(&format!("kill_ollama_child: {}", e)),
         }
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
     }
 }
@@ -536,7 +546,10 @@ fn bootstrap_ollama(
     std::thread::spawn(move || {
         if shutdown_requested(&app) {
 <<<<<<< ours
+<<<<<<< ours
 =======
+=======
+>>>>>>> theirs
             return;
         }
         update_status(&app, |s| {
@@ -651,11 +664,15 @@ fn bootstrap_ollama(
                 }
                 Err(e) => {
                     ollama_log(&format!("No se pudo iniciar Ollama: {}", e));
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
                     finish_ollama_bootstrap(&app, backend_port);
                     return;
                 }
             }
+<<<<<<< ours
 <<<<<<< ours
         }
 
@@ -667,6 +684,8 @@ fn bootstrap_ollama(
             finish_ollama_bootstrap(&app, backend_port);
             return;
 =======
+=======
+>>>>>>> theirs
             wait_for_port(11434, 30);
 >>>>>>> theirs
         }
