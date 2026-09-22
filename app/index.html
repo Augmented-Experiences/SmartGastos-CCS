@@ -1191,9 +1191,97 @@ a:hover { text-decoration: underline; }
 .asst-toggle:hover { transform: scale(1.08); }
 
 /* ── Nuevo Gasto — Layout ───────────────────────────────────── */
-.ng-layout { display: grid; grid-template-columns: 1fr 340px; gap: 18px; align-items: start; }
+.ng-layout { display: block; }
 .ng-main {}
-.ng-side {}
+.dash-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.8fr);
+  gap: 14px;
+  align-items: start;
+  margin-top: 18px;
+}
+.ng-review.with-preview {
+  display: grid;
+  grid-template-columns: minmax(420px, 52%) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.preview-card { position: sticky; top: 12px; overflow: hidden; padding: 0; }
+.doc-zoom-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.doc-zoom-title { font-size: 13px; font-weight: 700; margin-right: auto; }
+.doc-zoom-stage {
+  height: min(82vh, 900px);
+  overflow: hidden;
+  position: relative;
+  background: #0e1a2b;
+  cursor: grab;
+  touch-action: none;
+}
+.doc-zoom-stage.dragging { cursor: grabbing; }
+.doc-zoom-stage.selecting { cursor: crosshair; }
+.region-rect {
+  position: absolute;
+  border: 2px solid #3DAE2B;
+  background: rgba(61, 174, 43, 0.2);
+  pointer-events: none;
+  z-index: 2;
+}
+.region-panel {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.region-zoom {
+  width: 100%;
+  max-height: 180px;
+  background: #0e1a2b;
+  border-radius: var(--radius-sm);
+}
+.region-actions { display: flex; gap: 8px; align-items: center; }
+.region-actions select { flex: 1; }
+.doc-zoom-stage img,
+.doc-zoom-stage iframe {
+  position: absolute;
+  left: 0; top: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  max-width: none;
+}
+.doc-zoom-stage iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+.doc-zoom-hint {
+  font-size: 11px;
+  color: var(--text3);
+  padding: 8px 12px 10px;
+}
+.fx-banner {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(217, 119, 6, 0.45);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.fx-chip {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 
 /* ── Insight Cards ──────────────────────────────────────────── */
 .insight-card {
@@ -1215,6 +1303,9 @@ a:hover { text-decoration: underline; }
 @media (max-width: 900px) {
   .ng-layout { grid-template-columns: 1fr; }
   .ng-side { display: none; }
+  .ng-review.with-preview { grid-template-columns: 1fr; }
+  .dash-split { grid-template-columns: 1fr; }
+  .preview-card { position: static; }
   .charts-grid { grid-template-columns: 1fr; }
   .result-body { grid-template-columns: 1fr; }
   .doc-detail-grid { grid-template-columns: 1fr; }
@@ -2174,7 +2265,7 @@ async function obFinish() {
     // Botón de inicio
     const btnDiv = document.createElement('div');
     btnDiv.style.cssText = 'padding:14px 18px;border-top:1px solid var(--border);text-align:center';
-    btnDiv.innerHTML = `<button class="btn btn-primary btn-xl" onclick="obGoApp()">🚀 Empezar a usar Ledger AI</button>`;
+    btnDiv.innerHTML = `<button class="btn btn-primary btn-xl" onclick="obGoApp()">Empezar a usar SmartGastos</button>`;
     document.querySelector('.ob-chat').appendChild(btnDiv);
 
   } catch(e) {
@@ -2188,7 +2279,7 @@ function obGoApp() {
   showSection('nuevo-gasto');
   setTimeout(() => {
     openAssistant();
-    addAsstMsg(`¡Bienvenido a Ledger AI! 🎉\n\nTu empresa "${state.empresa?.razon_social}" está lista.\n\nSube tu primer documento para comenzar. El pipeline IA lo procesará en segundos.`);
+    addAsstMsg(`¡Bienvenido a SmartGastos! 🎉\n\nTu empresa "${state.empresa?.razon_social}" está lista.\n\nSube tu primer documento para comenzar. El pipeline IA lo procesará en segundos.`);
   }, 500);
 }
 
@@ -2256,10 +2347,29 @@ async function renderDashboard() {
         <canvas id="chartTrend"></canvas>
       </div>
     </div>
-    <div style="margin-top:18px">
+    <div class="dash-split">
       <div class="card">
         <div class="card-title">💻 Rendimiento de Modelos IA</div>
         <div id="semaphoreContainer"><div class="spinner" style="margin:10px auto"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title">💡 Consejos</div>
+        <div class="insight-card tip">
+          <div class="ic-title">📸 Mejor calidad OCR</div>
+          Usa imágenes bien iluminadas y sin sombras para mejores resultados.
+        </div>
+        <div class="insight-card info">
+          <div class="ic-title">🔄 Procesamiento offline</div>
+          Todo se procesa localmente con tu motor IA. Sin internet requerido.
+        </div>
+        <div class="insight-card success">
+          <div class="ic-title">✓ Formatos soportados</div>
+          PDF, JPG, PNG, BMP, TIFF, WebP
+        </div>
+        <div class="insight-card tip">
+          <div class="ic-title">🔲 Zona de lectura</div>
+          Si un dato no se leyó, márcalo en la vista previa y reconoce solo esa zona.
+        </div>
       </div>
     </div>
     <div style="margin-top:14px">
@@ -2413,7 +2523,7 @@ async function renderRecentDocs() {
             <tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openDocModal('${doc.id}')">
               <td style="padding:9px 7px;font-size:12px">${doc.proveedor || '—'}</td>
               <td style="padding:9px 7px;font-size:11px;color:var(--text2)">${doc.fecha_emision ? doc.fecha_emision.split('T')[0] : '—'}</td>
-              <td style="padding:9px 7px;font-size:12px;font-weight:700;color:var(--ccs-azul-oscuro)">${doc.monto_total ? '$' + Number(doc.monto_total).toLocaleString('es-CL') : '—'}</td>
+              <td style="padding:9px 7px;font-size:12px;font-weight:700;color:var(--ccs-azul-oscuro)">${doc.monto_total ? docAmountHtml(doc) : '—'}</td>
               <td style="padding:9px 7px"><span class="doc-cat">${doc.categoria_nombre || 'Sin categoría'}</span></td>
               <td style="padding:9px 7px"><span class="badge badge-${doc.estado_revision || 'pendiente'}">${statusLabel(doc.estado_revision)}</span></td>
             </tr>`).join('')}
@@ -2441,6 +2551,40 @@ function renderNuevoGasto() {
   document.getElementById('mainContent').innerHTML = `
     <div class="ng-layout">
       <div class="ng-main">
+        <div class="ng-review" id="ngReview">
+          <div class="card preview-card" id="previewCard" style="display:none">
+            <div class="doc-zoom-bar">
+              <span class="doc-zoom-title">Vista previa</span>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="zoomDoc(0.8)" title="Alejar">−</button>
+              <span id="zoomLabel">100%</span>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="zoomDoc(1.25)" title="Acercar">+</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="zoomDoc(0)">Ajustar</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnRegion" onclick="toggleRegionSelect()">Seleccionar zona</button>
+            </div>
+            <div class="doc-zoom-stage" id="docZoomStage">
+              <img id="docZoomImg" alt="Documento subido" draggable="false" />
+              <iframe id="docZoomFrame" title="Documento PDF" style="display:none"></iframe>
+              <div id="regionRect" class="region-rect" style="display:none"></div>
+            </div>
+            <div class="doc-zoom-hint">Rueda del mouse para acercar. Arrastra para moverte. Con «Seleccionar zona» marcas el dato que falta y se reconoce solo esa parte.</div>
+            <div class="region-panel" id="regionPanel" style="display:none">
+              <canvas id="regionZoom" class="region-zoom"></canvas>
+              <div class="region-actions">
+                <select class="ef-select" id="regionField">
+                  <option value="proveedor">Proveedor</option>
+                  <option value="rut_proveedor">RUT</option>
+                  <option value="fecha_emision">Fecha</option>
+                  <option value="folio">Folio</option>
+                  <option value="monto_neto">Monto neto</option>
+                  <option value="iva">IVA</option>
+                  <option value="monto_total">Total</option>
+                </select>
+                <button type="button" class="btn btn-primary btn-sm" id="btnRecognize" onclick="recognizeRegion()">Reconocer</button>
+              </div>
+              <div class="ef-hint" id="regionText"></div>
+            </div>
+          </div>
+          <div class="ng-flow">
         <!-- Upload -->
         <div class="card" id="uploadCard">
           <div class="card-title">📤 Subir Documento</div>
@@ -2503,43 +2647,6 @@ function renderNuevoGasto() {
             <button class="btn btn-secondary" onclick="resetUpload()">↩ Procesar otro</button>
           </div>
         </div>
-      </div>
-
-      <!-- Side Panel -->
-      <div class="ng-side">
-        <div class="card" style="margin-bottom:14px">
-          <div class="card-title">🤖 Agentes activos</div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${[
-              { icon: '\ud83d\udd0d', name: 'Agente OCR',         desc: 'Extracción de texto multi-modo' },
-              { icon: '\ud83d\udc41',  name: 'Agente Visual',      desc: 'Análisis visual del documento' },
-              { icon: '\ud83e\udde0', name: 'Agente Extractor',   desc: 'Consolidación de campos' },
-              { icon: '\ud83c\udff7', name: 'Agente Clasificador', desc: 'Categorización contable' },
-              { icon: '\ud83d\udee1', name: 'Agente Auditor',     desc: 'Control y anomalías' },
-            ].map(a => `
-              <div style="display:flex;align-items:center;gap:9px;padding:9px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius-sm)">
-                <span style="font-size:18px">${a.icon}</span>
-                <div>
-                  <div style="font-size:12px;font-weight:700">${a.name}</div>
-                  <div style="font-size:10px;color:var(--text3)">${a.desc}</div>
-                </div>
-              </div>`).join('')}
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">💡 Consejos</div>
-          <div class="insight-card tip">
-            <div class="ic-title">📸 Mejor calidad OCR</div>
-            Usa imágenes bien iluminadas y sin sombras para mejores resultados.
-          </div>
-          <div class="insight-card info">
-            <div class="ic-title">🔄 Procesamiento offline</div>
-            Todo se procesa localmente con tu motor IA. Sin internet requerido.
-          </div>
-          <div class="insight-card success">
-            <div class="ic-title">✓ Formatos soportados</div>
-            PDF, JPG, PNG, BMP, TIFF, WebP
           </div>
         </div>
       </div>
@@ -2645,6 +2752,540 @@ function updateStep(stepId, status, data) {
   document.getElementById(`pstep_${stepId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
+const WORLD_CURRENCIES = `
+AED|Dirham de Emiratos
+AFN|Afgani
+ALL|Lek
+AMD|Dram armenio
+ANG|Florín antillano
+AOA|Kwanza
+ARS|Peso argentino
+AUD|Dólar australiano
+AWG|Florín arubeño
+AZN|Manat azerbaiyano
+BAM|Marco convertible
+BBD|Dólar de Barbados
+BDT|Taka
+BGN|Lev búlgaro
+BHD|Dinar bareiní
+BIF|Franco burundés
+BMD|Dólar bermudeño
+BND|Dólar de Brunéi
+BOB|Boliviano
+BRL|Real brasileño
+BSD|Dólar bahameño
+BTN|Ngultrum
+BWP|Pula
+BYN|Rublo bielorruso
+BZD|Dólar beliceño
+CAD|Dólar canadiense
+CDF|Franco congoleño
+CHF|Franco suizo
+CLF|Unidad de Fomento (CLF)
+CLP|Peso chileno
+CNY|Yuan chino
+COP|Peso colombiano
+CRC|Colón costarricense
+CUP|Peso cubano
+CVE|Escudo caboverdiano
+CZK|Corona checa
+DJF|Franco yibutiano
+DKK|Corona danesa
+DOP|Peso dominicano
+DZD|Dinar argelino
+EGP|Libra egipcia
+ERN|Nakfa
+ETB|Birr etíope
+EUR|Euro
+FJD|Dólar fiyiano
+FKP|Libra malvinense
+GBP|Libra esterlina
+GEL|Lari georgiano
+GHS|Cedi
+GIP|Libra gibraltareña
+GMD|Dalasi
+GNF|Franco guineano
+GTQ|Quetzal
+GYD|Dólar guyanés
+HKD|Dólar de Hong Kong
+HNL|Lempira
+HTG|Gourde
+HUF|Forinto
+IDR|Rupia indonesia
+ILS|Séquel
+INR|Rupia india
+IQD|Dinar iraquí
+IRR|Rial iraní
+ISK|Corona islandesa
+JMD|Dólar jamaiquino
+JOD|Dinar jordano
+JPY|Yen
+KES|Chelín keniano
+KGS|Som kirguís
+KHR|Riel
+KMF|Franco comorense
+KPW|Won norcoreano
+KRW|Won surcoreano
+KWD|Dinar kuwaití
+KYD|Dólar caimaneño
+KZT|Tenge
+LAK|Kip
+LBP|Libra libanesa
+LKR|Rupia de Sri Lanka
+LRD|Dólar liberiano
+LSL|Loti
+LYD|Dinar libio
+MAD|Dírham marroquí
+MDL|Leu moldavo
+MGA|Ariary
+MKD|Denar
+MMK|Kyat
+MNT|Tugrik
+MOP|Pataca
+MRU|Uguiya
+MUR|Rupia mauriciana
+MVR|Rufiyaa
+MWK|Kwacha malauí
+MXN|Peso mexicano
+MYR|Ringgit
+MZN|Metical
+NAD|Dólar namibio
+NGN|Naira
+NIO|Córdoba
+NOK|Corona noruega
+NPR|Rupia nepalí
+NZD|Dólar neozelandés
+OMR|Rial omaní
+PAB|Balboa
+PEN|Sol peruano
+PGK|Kina
+PHP|Peso filipino
+PKR|Rupia pakistaní
+PLN|Zloty
+PYG|Guaraní
+QAR|Riyal catarí
+RON|Leu rumano
+RSD|Dinar serbio
+RUB|Rublo ruso
+RWF|Franco ruandés
+SAR|Riyal saudí
+SBD|Dólar salomonense
+SCR|Rupia seychelense
+SDG|Libra sudanesa
+SEK|Corona sueca
+SGD|Dólar de Singapur
+SHP|Libra de Santa Elena
+SLE|Leone
+SOS|Chelín somalí
+SRD|Dólar surinamés
+SSP|Libra sursudanesa
+STN|Dobra
+SYP|Libra siria
+SZL|Lilangeni
+THB|Baht
+TJS|Somoni
+TMT|Manat turcomano
+TND|Dinar tunecino
+TOP|Paanga
+TRY|Lira turca
+TTD|Dólar de Trinidad y Tobago
+TWD|Dólar taiwanés
+TZS|Chelín tanzano
+UAH|Grivna
+UF|Unidad de Fomento
+UGX|Chelín ugandés
+USD|Dólar estadounidense
+USN|Dólar estadounidense (día siguiente)
+UYU|Peso uruguayo
+UZS|Som uzbeko
+VES|Bolívar
+VND|Dong
+VUV|Vatu
+WST|Tala
+XAF|Franco CFA BEAC
+XCD|Dólar del Caribe Oriental
+XOF|Franco CFA BCEAO
+XPF|Franco CFP
+YER|Rial yemení
+ZAR|Rand
+ZMW|Kwacha zambiano
+ZWL|Dólar zimbabuense
+UTM|Unidad Tributaria Mensual
+`.trim().split('\n').map(line => {
+  const parts = line.split('|');
+  return [parts[0], parts.slice(1).join('|')];
+});
+
+const zoomState = { scale: 1, x: 0, y: 0, dragging: false, lx: 0, ly: 0 };
+
+function localCurrency() {
+  return ((state.empresa && state.empresa.moneda_base) || 'CLP').toUpperCase();
+}
+
+function currencyOptionsHtml(selected) {
+  const code = (selected || localCurrency()).toUpperCase();
+  const rows = WORLD_CURRENCIES.slice();
+  if (!rows.some(([c]) => c === code)) rows.push([code, code]);
+  rows.sort((a, b) => a[0].localeCompare(b[0]));
+  return rows.map(([c, name]) =>
+    `<option value="${c}"${c === code ? ' selected' : ''}>${c} — ${escHtml(name)}</option>`
+  ).join('');
+}
+
+function filterCurrencyOptions() {
+  const q = (document.getElementById('ef_moneda_q')?.value || '').trim().toLowerCase();
+  const sel = document.getElementById('ef_moneda');
+  if (!sel) return;
+  [...sel.options].forEach(opt => {
+    const hay = (opt.value + ' ' + opt.textContent).toLowerCase();
+    opt.hidden = !!q && !hay.includes(q);
+  });
+}
+
+function parseLooseNumber(v) {
+  const cleaned = String(v || '').replace(/[^\d.,\-]/g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : 0;
+}
+
+function currentFx() {
+  const moneda = (document.getElementById('ef_moneda')?.value || localCurrency()).toUpperCase();
+  const base = localCurrency();
+  if (moneda === base) return { moneda, base, rate: 1, foreign: false };
+  return { moneda, base, rate: parseLooseNumber(document.getElementById('ef_tipo_cambio')?.value), foreign: true };
+}
+
+function onCurrencyChange() {
+  const fx = currentFx();
+  const wrap = document.getElementById('ef_fx_wrap');
+  if (wrap) wrap.style.display = fx.foreign ? '' : 'none';
+  const code = document.getElementById('ef_fx_code');
+  const base = document.getElementById('ef_fx_base');
+  if (code) code.textContent = fx.moneda;
+  if (base) base.textContent = fx.base;
+  updateLocalAmounts();
+}
+
+function updateLocalAmounts() {
+  const banner = document.getElementById('ef_fx_banner');
+  if (!banner) return;
+  const fx = currentFx();
+  const wrap = document.getElementById('ef_fx_wrap');
+  if (wrap) wrap.style.display = fx.foreign ? '' : 'none';
+  if (!fx.foreign) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+    return;
+  }
+  const neto = parseLooseNumber(document.getElementById('ef_monto_neto')?.value);
+  const iva = parseLooseNumber(document.getElementById('ef_iva')?.value);
+  const total = parseLooseNumber(document.getElementById('ef_monto_total')?.value);
+  const fmt = (n) => n.toLocaleString('es-CL', { maximumFractionDigits: 2 });
+  banner.style.display = '';
+  if (!(fx.rate > 0)) {
+    banner.innerHTML = `<span class="fx-chip">Moneda distinta</span>
+      <div style="margin-top:6px">Indica cuántos ${fx.base} vale 1 ${fx.moneda}. El gasto se guardará en ${fx.base}.</div>`;
+    return;
+  }
+  banner.innerHTML = `<span class="fx-chip">Calculado desde ${fx.moneda}</span>
+    <div style="margin-top:6px">1 ${fx.moneda} = ${fmt(fx.rate)} ${fx.base}</div>
+    <div>Neto en ${fx.base}: <strong>${fmt(neto * fx.rate)}</strong> · IVA: <strong>${fmt(iva * fx.rate)}</strong></div>
+    <div>Total en moneda local: <strong>${fmt(total * fx.rate)} ${fx.base}</strong></div>`;
+}
+
+function docFx(doc) {
+  const base = localCurrency();
+  const moneda = String(doc.moneda || base).toUpperCase();
+  let rate = Number(doc.tipo_cambio);
+  if (!isFinite(rate) || rate <= 0) rate = 1;
+  if (moneda === base) rate = 1;
+  return { base, moneda, rate, foreign: moneda !== base };
+}
+
+function formatLocalMoney(amount, code) {
+  const n = Number(amount);
+  if (!isFinite(n)) return '—';
+  return n.toLocaleString('es-CL', { maximumFractionDigits: 2 }) + ' ' + code;
+}
+
+function docAmountHtml(doc) {
+  const original = Number(doc.monto_total);
+  if (!isFinite(original)) return '—';
+  const fx = docFx(doc);
+  const local = doc.monto_total_local != null && isFinite(Number(doc.monto_total_local))
+    ? Number(doc.monto_total_local)
+    : original * fx.rate;
+  let html = formatLocalMoney(local, fx.base);
+  if (fx.foreign) {
+    html += ` <span class="fx-chip" title="${formatLocalMoney(original, fx.moneda)} · 1 ${fx.moneda} = ${fx.rate.toLocaleString('es-CL')} ${fx.base}">Desde ${fx.moneda}</span>`;
+  }
+  return html;
+}
+
+const regionSelect = { active: false, dragging: false, start: null, end: null, norm: null };
+
+function toggleRegionSelect() {
+  const img = document.getElementById('docZoomImg');
+  if (!img || img.style.display === 'none' || !img.naturalWidth) {
+    showToast('La selección funciona cuando la página ya se ve como imagen', 'error');
+    return;
+  }
+  regionSelect.active = !regionSelect.active;
+  document.getElementById('docZoomStage')?.classList.toggle('selecting', regionSelect.active);
+  document.getElementById('btnRegion')?.classList.toggle('btn-primary', regionSelect.active);
+  if (!regionSelect.active) {
+    const rect = document.getElementById('regionRect');
+    if (rect) rect.style.display = 'none';
+  }
+}
+
+function stagePoint(event) {
+  const stage = document.getElementById('docZoomStage');
+  const box = stage.getBoundingClientRect();
+  return { x: event.clientX - box.left, y: event.clientY - box.top };
+}
+
+function imageNorm(px, py) {
+  const img = document.getElementById('docZoomImg');
+  if (!img || img.style.display === 'none' || !img.naturalWidth) return null;
+  const ix = (px - zoomState.x) / zoomState.scale;
+  const iy = (py - zoomState.y) / zoomState.scale;
+  return {
+    x: Math.max(0, Math.min(1, ix / img.naturalWidth)),
+    y: Math.max(0, Math.min(1, iy / img.naturalHeight)),
+  };
+}
+
+function paintRegionRect(a, b) {
+  const el = document.getElementById('regionRect');
+  if (!el || !a || !b) return;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x);
+  const h = Math.abs(a.y - b.y);
+  el.style.display = w > 3 && h > 3 ? 'block' : 'none';
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  el.style.width = w + 'px';
+  el.style.height = h + 'px';
+}
+
+function drawRegionPreview() {
+  const img = document.getElementById('docZoomImg');
+  const canvas = document.getElementById('regionZoom');
+  const zone = regionSelect.norm;
+  if (!img || !canvas || !zone) return;
+  const sx = zone.x * img.naturalWidth;
+  const sy = zone.y * img.naturalHeight;
+  const sw = Math.max(1, zone.w * img.naturalWidth);
+  const sh = Math.max(1, zone.h * img.naturalHeight);
+  const scale = Math.min(4, Math.max(1, 720 / sw));
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  document.getElementById('regionPanel').style.display = '';
+}
+
+function cleanRegionText(text, field) {
+  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  if (field === 'monto_neto' || field === 'iva' || field === 'monto_total') {
+    const nums = flat.match(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?/g);
+    return nums ? nums[nums.length - 1] : flat;
+  }
+  return flat;
+}
+
+async function recognizeRegion() {
+  const docId = state.processingDoc && state.processingDoc.doc_id;
+  const zone = regionSelect.norm;
+  if (!zone) { showToast('Marca una zona en la vista previa', 'error'); return; }
+  if (!docId) { showToast('Espera a que termine el análisis del documento', 'error'); return; }
+  const field = document.getElementById('regionField')?.value || 'proveedor';
+  const button = document.getElementById('btnRecognize');
+  if (button) button.disabled = true;
+  try {
+    const response = await fetch(`${API}/api/documentos/${docId}/ocr-region`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(zone),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.detail || 'No se pudo reconocer la zona');
+    const text = cleanRegionText(data.text, field);
+    const note = document.getElementById('regionText');
+    if (note) note.textContent = text ? `Leído: ${data.text}` : 'No se leyó texto en esa zona. Acércate más y márcala de nuevo.';
+    if (!text) return;
+    const input = document.getElementById(`ef_${field}`);
+    if (input) {
+      input.value = text;
+      validateExpenseField(field);
+      if (field === 'monto_neto' || field === 'iva' || field === 'monto_total') {
+        autoCalcTotal();
+        updateLocalAmounts();
+      }
+    }
+    showToast('Zona reconocida y copiada al campo', 'success');
+  } catch (error) {
+    showToast(error.message || 'Error al reconocer la zona', 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function bindZoomOnce() {
+  const stage = document.getElementById('docZoomStage');
+  if (!stage || stage.dataset.bound) return;
+  stage.dataset.bound = '1';
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = stage.getBoundingClientRect();
+    zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX - rect.left, e.clientY - rect.top);
+  }, { passive: false });
+  stage.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    if (regionSelect.active) {
+      regionSelect.dragging = true;
+      regionSelect.start = stagePoint(e);
+      regionSelect.end = regionSelect.start;
+      paintRegionRect(regionSelect.start, regionSelect.end);
+      stage.setPointerCapture(e.pointerId);
+      return;
+    }
+    zoomState.dragging = true;
+    zoomState.lx = e.clientX;
+    zoomState.ly = e.clientY;
+    stage.classList.add('dragging');
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (regionSelect.dragging) {
+      regionSelect.end = stagePoint(e);
+      paintRegionRect(regionSelect.start, regionSelect.end);
+      return;
+    }
+    if (!zoomState.dragging) return;
+    zoomState.x += e.clientX - zoomState.lx;
+    zoomState.y += e.clientY - zoomState.ly;
+    zoomState.lx = e.clientX;
+    zoomState.ly = e.clientY;
+    applyZoom();
+  });
+  const endDrag = () => {
+    if (regionSelect.dragging) {
+      regionSelect.dragging = false;
+      const start = imageNorm(regionSelect.start.x, regionSelect.start.y);
+      const end = imageNorm(regionSelect.end.x, regionSelect.end.y);
+      if (start && end) {
+        regionSelect.norm = {
+          x: Math.min(start.x, end.x),
+          y: Math.min(start.y, end.y),
+          w: Math.abs(end.x - start.x),
+          h: Math.abs(end.y - start.y),
+        };
+        if (regionSelect.norm.w > 0.01 && regionSelect.norm.h > 0.01) drawRegionPreview();
+      }
+      return;
+    }
+    zoomState.dragging = false;
+    stage.classList.remove('dragging');
+  };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+}
+
+function applyZoom() {
+  const img = document.getElementById('docZoomImg');
+  const frame = document.getElementById('docZoomFrame');
+  const target = img && img.style.display !== 'none' ? img : frame;
+  if (!target) return;
+  target.style.transform = `translate(${zoomState.x}px, ${zoomState.y}px) scale(${zoomState.scale})`;
+  const label = document.getElementById('zoomLabel');
+  if (label) label.textContent = Math.round(zoomState.scale * 100) + '%';
+}
+
+function fitZoom() {
+  const stage = document.getElementById('docZoomStage');
+  const img = document.getElementById('docZoomImg');
+  if (img && img.style.display !== 'none' && img.naturalWidth && stage) {
+    const pad = 16;
+    const sx = (stage.clientWidth - pad) / img.naturalWidth;
+    const sy = (stage.clientHeight - pad) / img.naturalHeight;
+    zoomState.scale = Math.min(sx, sy);
+    zoomState.x = (stage.clientWidth - img.naturalWidth * zoomState.scale) / 2;
+    zoomState.y = (stage.clientHeight - img.naturalHeight * zoomState.scale) / 2;
+    applyZoom();
+    return;
+  }
+  zoomState.scale = 1;
+  zoomState.x = 0;
+  zoomState.y = 0;
+  applyZoom();
+}
+
+function zoomAt(factor, cx, cy) {
+  const next = Math.min(8, Math.max(0.25, zoomState.scale * factor));
+  const ratio = next / zoomState.scale;
+  zoomState.x = cx - (cx - zoomState.x) * ratio;
+  zoomState.y = cy - (cy - zoomState.y) * ratio;
+  zoomState.scale = next;
+  applyZoom();
+}
+
+function zoomDoc(factor) {
+  const stage = document.getElementById('docZoomStage');
+  if (!stage) return;
+  if (!factor) { fitZoom(); return; }
+  zoomAt(factor, stage.clientWidth / 2, stage.clientHeight / 2);
+}
+
+function showUploadPreview(file) {
+  state.pendingUploadFile = file;
+  state.pendingUploadName = file.name || '';
+  if (state.uploadObjectUrl) URL.revokeObjectURL(state.uploadObjectUrl);
+  state.uploadObjectUrl = URL.createObjectURL(file);
+  const card = document.getElementById('previewCard');
+  const review = document.getElementById('ngReview');
+  const img = document.getElementById('docZoomImg');
+  const frame = document.getElementById('docZoomFrame');
+  if (!card || !review || !img || !frame) return;
+  card.style.display = '';
+  review.classList.add('with-preview');
+  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  zoomState.scale = 1;
+  zoomState.x = 0;
+  zoomState.y = 0;
+  if (isPdf) {
+    img.style.display = 'none';
+    img.removeAttribute('src');
+    frame.style.display = 'block';
+    frame.src = state.uploadObjectUrl;
+    fitZoom();
+  } else {
+    frame.style.display = 'none';
+    frame.src = 'about:blank';
+    img.style.display = 'block';
+    img.onload = () => fitZoom();
+    img.src = state.uploadObjectUrl;
+  }
+  bindZoomOnce();
+}
+
+function useServerPreview(docId) {
+  if (!docId) return;
+  const img = document.getElementById('docZoomImg');
+  const frame = document.getElementById('docZoomFrame');
+  if (!img) return;
+  const probe = new Image();
+  probe.onload = () => {
+    if (frame) frame.style.display = 'none';
+    img.style.display = 'block';
+    img.onload = () => fitZoom();
+    img.src = probe.src;
+  };
+  probe.src = `${API}/api/documentos/${docId}/preview?full=1&t=${Date.now()}`;
+}
+
 function renderResultPanel(data) {
   const fields = data.fields || {};
   const cls = data.classification || {};
@@ -2696,7 +3337,7 @@ function renderResultPanel(data) {
         <input class="ef-input" id="ef_monto_neto" type="text"
           value="${fields.monto_neto || ''}"
           placeholder="Ej: 50000"
-          oninput="validateExpenseField('monto_neto'); autoCalcTotal()" />
+          oninput="validateExpenseField('monto_neto'); autoCalcTotal(); updateLocalAmounts()" />
         <div class="ef-error" id="ef_err_monto_neto"></div>
       </div>
       <div class="ef-group">
@@ -2704,7 +3345,7 @@ function renderResultPanel(data) {
         <input class="ef-input" id="ef_iva" type="text"
           value="${fields.iva || ''}"
           placeholder="Ej: 9500"
-          oninput="validateExpenseField('iva'); autoCalcTotal()" />
+          oninput="validateExpenseField('iva'); autoCalcTotal(); updateLocalAmounts()" />
         <div class="ef-error" id="ef_err_iva"></div>
       </div>
       <div class="ef-group ef-total-highlight">
@@ -2713,7 +3354,7 @@ function renderResultPanel(data) {
           value="${fields.monto_total || ''}"
           placeholder="Ej: 59500"
           style="font-size:16px;color:var(--ccs-azul-oscuro)"
-          oninput="validateExpenseField('monto_total')" />
+          oninput="validateExpenseField('monto_total'); updateLocalAmounts()" />
         <div class="ef-error" id="ef_err_monto_total"></div>
         <div class="ef-hint" id="ef_calc_hint"></div>
       </div>
@@ -2729,15 +3370,25 @@ function renderResultPanel(data) {
         </select>
         <div class="ef-error" id="ef_err_tipo_documento"></div>
       </div>
-      <div class="ef-group">
-        <label class="ef-label">Moneda</label>
-        <select class="ef-select" id="ef_moneda">
-          <option value="CLP" ${(!fields.moneda || fields.moneda === 'CLP') ? 'selected' : ''}>CLP (Peso Chileno)</option>
-          <option value="USD" ${fields.moneda === 'USD' ? 'selected' : ''}>USD (Dólar)</option>
-          <option value="EUR" ${fields.moneda === 'EUR' ? 'selected' : ''}>EUR (Euro)</option>
-          <option value="UF" ${fields.moneda === 'UF' ? 'selected' : ''}>UF</option>
+      <div class="ef-group ef-full">
+        <label class="ef-label">Moneda del documento</label>
+        <input class="ef-input" id="ef_moneda_q" type="text"
+          placeholder="Buscar moneda: USD, euro, yen..."
+          oninput="filterCurrencyOptions()" />
+        <select class="ef-select" id="ef_moneda" size="6" onchange="onCurrencyChange()">
+          ${currencyOptionsHtml(fields.moneda)}
         </select>
+        <div class="ef-hint">Moneda local de la empresa: ${escHtml(localCurrency())}</div>
       </div>
+      <div class="ef-group ef-full" id="ef_fx_wrap" style="display:none">
+        <label class="ef-label">1 <span id="ef_fx_code">USD</span> equivale a</label>
+        <input class="ef-input" id="ef_tipo_cambio" type="text" inputmode="decimal"
+          placeholder="Valor en moneda local"
+          oninput="updateLocalAmounts()" />
+        <div class="ef-error" id="ef_err_tipo_cambio"></div>
+        <div class="ef-hint">Cuántos <span id="ef_fx_base">${escHtml(localCurrency())}</span> vale 1 unidad de la moneda del documento.</div>
+      </div>
+      <div class="ef-group ef-full" id="ef_fx_banner" style="display:none"></div>
     </div>
   `;
 
@@ -2767,6 +3418,11 @@ function renderResultPanel(data) {
     state.categorias.map(c =>
       `<option value="${c.id}" ${c.nombre === cls.categoria_sugerida ? 'selected' : ''}>${escHtml(c.nombre)}</option>`
     ).join('');
+
+  onCurrencyChange();
+  if (/\.pdf$/i.test(state.pendingUploadName || '') && data.doc_id) {
+    useServerPreview(data.doc_id);
+  }
 
   // Notificar al asistente
   if (state.assistantOpen) {
@@ -2880,6 +3536,7 @@ function autoCalcTotal() {
   } else {
     if (hintEl) hintEl.textContent = '';
   }
+  updateLocalAmounts();
 }
 
 function validateAllExpenseFields() {
@@ -2896,6 +3553,17 @@ function validateAllExpenseFields() {
     if (errEl) errEl.textContent = 'El total no puede ser menor al monto neto';
     document.getElementById('ef_monto_total')?.classList.add('invalid');
     allValid = false;
+  }
+  const fx = currentFx();
+  const fxErr = document.getElementById('ef_err_tipo_cambio');
+  const fxInput = document.getElementById('ef_tipo_cambio');
+  if (fx.foreign && !(fx.rate > 0)) {
+    if (fxErr) fxErr.textContent = `Indica cuántos ${fx.base} vale 1 ${fx.moneda}`;
+    fxInput?.classList.add('invalid');
+    allValid = false;
+  } else if (fxErr) {
+    fxErr.textContent = '';
+    fxInput?.classList.remove('invalid');
   }
   return allValid;
 }
@@ -2921,7 +3589,8 @@ async function validateAndAcceptDocument() {
   const iva_raw = document.getElementById('ef_iva')?.value.trim();
   const monto_total_raw = document.getElementById('ef_monto_total')?.value.trim();
   const tipo_documento = document.getElementById('ef_tipo_documento')?.value || null;
-  const moneda = document.getElementById('ef_moneda')?.value || 'CLP';
+  const moneda = document.getElementById('ef_moneda')?.value || localCurrency();
+  const fx = currentFx();
   const catId = document.getElementById('catSelect')?.value || null;
 
   const parseNum = (v) => {
@@ -2937,6 +3606,7 @@ async function validateAndAcceptDocument() {
     iva: parseNum(iva_raw),
     monto_total: parseNum(monto_total_raw),
     tipo_documento, moneda,
+    tipo_cambio: fx.foreign ? fx.rate : 1,
     categoria_id: catId,
     estado_revision: 'REVISADO'
   };
@@ -2972,6 +3642,7 @@ async function validateAndAcceptDocument() {
 
 async function processFile(file) {
   if (!state.empresa) { showToast('Selecciona una empresa primero', 'error'); return; }
+  showUploadPreview(file);
   initPipelineUI(file.name);
 
   // Notificar al asistente
@@ -3054,6 +3725,26 @@ async function processFile(file) {
 
 function resetUpload() {
   state.processingDoc = null;
+  state.pendingUploadFile = null;
+  state.pendingUploadName = '';
+  if (state.uploadObjectUrl) {
+    URL.revokeObjectURL(state.uploadObjectUrl);
+    state.uploadObjectUrl = null;
+  }
+  const card = document.getElementById('previewCard');
+  const review = document.getElementById('ngReview');
+  if (card) card.style.display = 'none';
+  if (review) review.classList.remove('with-preview');
+  const img = document.getElementById('docZoomImg');
+  const frame = document.getElementById('docZoomFrame');
+  if (img) img.removeAttribute('src');
+  if (frame) frame.src = 'about:blank';
+  const region = document.getElementById('regionPanel');
+  const rect = document.getElementById('regionRect');
+  if (region) region.style.display = 'none';
+  if (rect) rect.style.display = 'none';
+  regionSelect.active = false;
+  regionSelect.norm = null;
   document.getElementById('pipelineWrap').style.display = 'none';
   document.getElementById('resultWrap').style.display = 'none';
   const fi = document.getElementById('fileInput');
@@ -3174,7 +3865,7 @@ function renderDocGrid(docs) {
         <div class="doc-info">
           <div class="doc-prov">${escHtml(doc.proveedor || 'Proveedor desconocido')}</div>
           <div class="doc-meta">${doc.fecha_emision ? doc.fecha_emision.split('T')[0] : 'Sin fecha'} · ${doc.folio || '—'}</div>
-          ${doc.monto_total ? `<div class="doc-amount">$${Number(doc.monto_total).toLocaleString('es-CL')}</div>` : ''}
+          ${doc.monto_total ? `<div class="doc-amount">${docAmountHtml(doc)}</div>` : ''}
           <span class="doc-cat">${escHtml(doc.categoria_nombre || 'Sin categoría')}</span>
         </div>
       </div>`;
@@ -3691,8 +4382,9 @@ async function openDocModal(docId) {
             ondrop="onDropToField(event,'monto_total','${docId}')">
             <div class="dfr-label">Total</div>
             <div class="dfr-value" id="dfrv_monto_total" style="color:var(--ccs-azul-oscuro);font-size:15px">
-              ${doc.monto_total ? '$' + Number(doc.monto_total).toLocaleString('es-CL') : '—'}
+              ${doc.monto_total ? docAmountHtml(doc) : '—'}
             </div>
+            ${docFx(doc).foreign ? `<div class="fx-banner">Este total está calculado desde ${escHtml(docFx(doc).moneda)} hacia ${escHtml(docFx(doc).base)}.</div>` : ''}
             <button class="dfr-edit-btn" onclick="startEditField('monto_total','${doc.monto_total||''}','${docId}')" title="Editar">✏️</button>
           </div>
           ${makeEditableField('tipo_documento', 'Tipo', doc.tipo_documento, docId)}

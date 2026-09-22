@@ -11,7 +11,7 @@
 //
 // Se ejecuta automáticamente antes de 'npm run build' / 'npm run dev'.
 // ============================================================
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -214,7 +214,10 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = "0.33"
-ureq = { version = "2", default-features = false }
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+zip = "0.6"
+flate2 = "1"
+tar = "0.4"
 
 [[bin]]
 name = "${pkg}"
@@ -313,6 +316,45 @@ const splashHtml = splashTpl
   .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle))
   .replaceAll("{{LOGO_HTML}}", logoHtml);
 writeFileSync(resolve(DESKTOP, "ui/index.html"), splashHtml);
+
+// One splash logo only: official white CCS mark. Assets may have already
+// copied splash-mark / color wordmark above; overwrite template + index.
+{
+  const canonicalTplPath = resolve(DESKTOP, "brand/splash.template.html");
+  const splashTplPath = resolve(DESKTOP, "ui/splash.template.html");
+  if (existsSync(canonicalTplPath)) {
+    copyFileSync(canonicalTplPath, splashTplPath);
+  } else if (existsSync(splashTplPath)) {
+    let t = readFileSync(splashTplPath, "utf8");
+    t = t.replace(/<img[^>]*splash-mark[^>]*>\s*/gi, "");
+    t = t.replace(/\.splash-mark\s*\{[^}]*\}/g, "");
+    t = t.replace(
+      /\.splash-logo\s*\{[^}]*\}/,
+      ".splash-logo { height: 64px; width: auto; max-width: min(280px, 70vw); object-fit: contain; display: block; }"
+    );
+    writeFileSync(splashTplPath, t);
+  }
+  const staleMark = resolve(DESKTOP, "ui/splash-mark.png");
+  if (existsSync(staleMark)) {
+    rmSync(staleMark, { force: true });
+  }
+  let logoHtmlOne = "";
+  const whitePng = resolve(DESKTOP, "brand/logo-ccs-white.png");
+  if (existsSync(whitePng)) {
+    copyFileSync(whitePng, resolve(DESKTOP, "ui/splash-logo.png"));
+    logoHtmlOne = `<img class="splash-logo" src="splash-logo.png" alt="${escapeHtml(productName)}" />\n  `;
+  }
+  const tplOne = readFileSync(splashTplPath, "utf8");
+  const htmlOne = tplOne
+    .replaceAll("{{PRODUCT_NAME}}", escapeHtml(productName))
+    .replaceAll("{{BRAND_HTML}}", brandHtml(productName))
+    .replaceAll("{{SPLASH_SUBTITLE}}", escapeHtml(splashSubtitle))
+    .replaceAll("{{PUBLISHER}}", escapeHtml(publisher))
+    .replaceAll("{{LOGO_HTML}}", logoHtmlOne)
+    .replace(/<img[^>]*splash-mark[^>]*>\s*/gi, "");
+  writeFileSync(resolve(DESKTOP, "ui/index.html"), htmlOne);
+}
+
 
 // --- 7) Cargo.lock: alinear nombre del paquete si cambió ---
 const lockPath = resolve(DESKTOP, "src-tauri/Cargo.lock");

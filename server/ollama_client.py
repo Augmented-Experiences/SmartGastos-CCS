@@ -17,6 +17,8 @@ import os
 import threading
 from typing import Dict, Optional
 
+import requests
+
 logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
@@ -85,6 +87,145 @@ def get_usage_stats() -> Dict:
         return dict(_usage_stats)
 
 
+_VISION_MARKERS = (
+    "moondream",
+    "llava",
+    "minicpm-v",
+    "llama3.2-vision",
+    "granite3.2-vision",
+    "bakllava",
+    "llama3-vision",
+)
+
+
+def _ollama_model_names() -> list:
+    try:
+        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        if r.status_code != 200:
+            logger.warning("/api/tags HTTP %s", r.status_code)
+            return []
+        return [m.get("name") for m in r.json().get("models", []) if m.get("name")]
+    except Exception as e:
+        logger.warning("No se pudo leer %s/api/tags: %s", OLLAMA_URL, e)
+        return []
+
+
+def _model_name_matches(have: str, want: str) -> bool:
+    if not have or not want:
+        return False
+    if have == want:
+        return True
+    if have.startswith(want + "-") or have.startswith(want + ":"):
+        return True
+    if want.startswith(have + "-"):
+        return True
+    return False
+
+
+def _is_vision_name(name: str) -> bool:
+    n = (name or "").lower()
+    return any(marker in n for marker in _VISION_MARKERS)
+
+
+def _launcher_model() -> str:
+    env_model = (
+        os.environ.get("OLLAMA_MODEL")
+        or os.environ.get("OLLAMA_DEFAULT_MODEL")
+        or ""
+    ).strip()
+    if env_model:
+        return env_model
+    data_dir = os.environ.get("DATA_DIR") or _DATA_DIR
+    marker = os.path.join(data_dir, "ollama", "active_model.txt")
+    try:
+        if os.path.isfile(marker):
+            with open(marker, encoding="utf-8") as fh:
+                return fh.read().strip()
+    except Exception:
+        pass
+    return ""
+
+
+def resolve_ollama_model(requested: str) -> str:
+    """Usa el modelo pedido si está en /api/tags; si no, el que el launcher ya bajó.
+
+    Bug Oscar (Caja, mismo en Gastos): splash bajó llama3.1:8b (RAM) y chat/agentes
+    pedían llama3.2:3b → POST /api/chat 404 → 503, con /api/health en 200.
+    """
+    names = _ollama_model_names()
+    env_model = _launcher_model()
+    want = (requested or "").strip()
+
+    if want:
+        for n in names:
+            if n == want:
+                return n
+        for n in names:
+            if _model_name_matches(n, want):
+                logger.info("Usando modelo %s (pedido %s)", n, want)
+                return n
+
+    if env_model:
+        for n in names:
+            if n == env_model or _model_name_matches(n, env_model):
+                if want and want != n:
+                    logger.warning(
+                        "Modelo de agente %s no esta en /api/tags; usando %s (OLLAMA_MODEL)",
+                        want,
+                        n,
+                    )
+                return n
+        if not names:
+            logger.warning("/api/tags vacio; intentando modelo del launcher %s", env_model)
+            return env_model
+
+    if names:
+        logger.warning(
+            "Modelo de agente %s no esta; usando %s (presente en /api/tags)",
+            want or "(vacio)",
+            names[0],
+        )
+        return names[0]
+
+    return want or env_model or "llama3.2:3b"
+
+
+def resolve_ollama_vision_model(requested: str) -> str:
+    """Elige un modelo de visión presente en /api/tags (moondream). Nunca un LLM de texto."""
+    names = _ollama_model_names()
+    vision_names = [n for n in names if _is_vision_name(n)]
+    want = (requested or "").strip() or "moondream"
+
+    if want:
+        for n in vision_names:
+            if n == want or _model_name_matches(n, want):
+                return n
+
+    for n in vision_names:
+        if "moondream" in n.lower():
+            if want and want != n:
+                logger.warning(
+                    "Modelo de vision %s no esta en /api/tags; usando %s",
+                    want,
+                    n,
+                )
+            return n
+
+    if vision_names:
+        logger.warning(
+            "Modelo de vision %s no esta; usando %s (presente en /api/tags)",
+            want,
+            vision_names[0],
+        )
+        return vision_names[0]
+
+    logger.warning(
+        "No hay modelo de vision en /api/tags (esperado moondream); pedido %s",
+        want,
+    )
+    return want
+
+
 def call_ollama(
     model: str,
     system_prompt: str,
@@ -114,7 +255,6 @@ def call_ollama(
     Returns:
         Respuesta limpia del LLM
     """
-    import requests
     import time
     from security import (
         sanitize_user_input, harden_system_prompt,
@@ -124,6 +264,12 @@ def call_ollama(
 
     if timeout is None:
         timeout = TIMEOUT_DEFAULT
+
+    if images:
+        model = resolve_ollama_vision_model(model)
+    else:
+        model = resolve_ollama_model(model)
+    logger.info("call_ollama model=%s url=%s", model, OLLAMA_URL)
 
     # Capa 2: Sanitizar input del usuario
     if not skip_sanitization:
@@ -169,6 +315,11 @@ def call_ollama(
 
         if resp.status_code == 404:
             # Modelo no encontrado — iniciar descarga automática
+            logger.warning(
+                "Ollama /api/chat 404 model=%s tags=%s",
+                model,
+                _ollama_model_names(),
+            )
             _start_pull_background(model)
             with _stats_lock:
                 _usage_stats["failed_calls"] += 1
@@ -223,7 +374,6 @@ def call_ollama_generate(
     Llamada a /api/generate con seguridad integrada.
     Retorna dict con {response, thinking, raw}.
     """
-    import requests
     import time
     from security import (
         sanitize_user_input, harden_system_prompt,
@@ -233,6 +383,12 @@ def call_ollama_generate(
 
     if timeout is None:
         timeout = TIMEOUT_DEFAULT
+
+    if images:
+        model = resolve_ollama_vision_model(model)
+    else:
+        model = resolve_ollama_model(model)
+    logger.info("call_ollama_generate model=%s url=%s", model, OLLAMA_URL)
 
     # Sanitizar
     if not skip_sanitization:
@@ -274,6 +430,11 @@ def call_ollama_generate(
         resp.encoding = "utf-8"
 
         if resp.status_code == 404:
+            logger.warning(
+                "Ollama /api/generate 404 model=%s tags=%s",
+                model,
+                _ollama_model_names(),
+            )
             _start_pull_background(model)
             with _stats_lock:
                 _usage_stats["failed_calls"] += 1
@@ -319,10 +480,11 @@ def call_ollama_generate(
 def is_model_available(model: str) -> bool:
     """Verifica si un modelo está disponible en Ollama."""
     try:
-        import requests
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        models = [m["name"] for m in r.json().get("models", [])]
-        return model in models or any(m.startswith(model.split(":")[0]) for m in models)
+        models = _ollama_model_names()
+        return model in models or any(
+            _model_name_matches(m, model) or m.startswith(model.split(":")[0])
+            for m in models
+        )
     except Exception:
         return False
 
@@ -338,7 +500,6 @@ def _start_pull_background(model: str):
 
 def _do_pull(model: str):
     """Descarga un modelo de Ollama en background (thread-safe)."""
-    import requests
     with _pull_lock:
         _pull_status[model]["status"] = "pulling"
     try:

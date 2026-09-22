@@ -38,6 +38,7 @@ import base64
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import subprocess
@@ -47,7 +48,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Generator, List, Optional, Tuple
 
-from agents.ocr_agent import get_ocr_agent
+from agents.ocr_agent import get_ocr_agent, render_pdf_page
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ VISION_DEFAULT_MODEL = "moondream"  # Default para agente visual (DEBE ser multi
 # Para visión: moondream es el más ligero con soporte de imagen
 VISION_MODELS = ["moondream", "llava:7b", "minicpm-v", "llava:13b"]  # Modelos con soporte de imagen
 TEXT_MODELS   = ["qwen3:0.6b", "qwen3:1.7b", "llama3.2:3b", "llama3:8b"]  # Fallback genérico
-LLAMA_TEXT_MODELS = ["llama3.2:3b", "llama3:8b", "qwen3:0.6b"]  # Preferencia llama
+LLAMA_TEXT_MODELS = ["llama3.1:8b", "llama3.1", "llama3.2:3b", "llama3:8b", "qwen3:0.6b"]  # Preferencia llama; RAM-tier primero
 DESKTOP_EXTRACTOR_MODELS = [
     "llama3.1:8b",
     "llama3.1",
@@ -259,7 +260,7 @@ def _extract_fields_from_thinking(thinking_text: str) -> Dict:
             cleaned = cleaned.replace(',', '')
         try:
             val = float(cleaned)
-            return val if val > 0 else None
+            return val if math.isfinite(val) and val > 0 else None
         except (ValueError, TypeError):
             return None
 
@@ -295,6 +296,11 @@ def _ollama_generate(model: str, prompt: str, image_b64: Optional[str] = None,
     """
     try:
         import requests
+        from ollama_client import resolve_ollama_model, resolve_ollama_vision_model
+        if image_b64:
+            model = resolve_ollama_vision_model(model)
+        else:
+            model = resolve_ollama_model(model)
         # Construir el prompt final (sin prefijo /think - usamos la opción nativa)
         final_prompt = prompt
         if enable_thinking and prompt.startswith("/think\n"):
@@ -668,7 +674,7 @@ def _extract_by_regex(text: str) -> Dict:
             cleaned = cleaned.replace(',', '')
         try:
             val = float(cleaned)
-            return val if val > 0 else None
+            return val if math.isfinite(val) and val > 0 else None
         except (ValueError, TypeError):
             return None
 
@@ -1066,14 +1072,24 @@ class DocumentPipelineAgent:
     def _get_models(self):
         """Detecta modelos disponibles (cached). Retorna (vision_model, llama_model)."""
         if self._available_models is None:
+            from ollama_client import (
+                resolve_ollama_model,
+                resolve_ollama_vision_model,
+                _is_vision_name,
+            )
             self._available_models = _ollama_list()
-            self._vision_model = _find_best_model(VISION_MODELS, self._available_models)
-            self._llama_model = _find_best_model(LLAMA_TEXT_MODELS, self._available_models)
-            # Fallback: si no hay llama, usar qwen para todo
+            vision = resolve_ollama_vision_model(VISION_DEFAULT_MODEL)
+            if self._available_models and not any(_is_vision_name(n) for n in self._available_models):
+                vision = None
+            elif not self._available_models:
+                vision = None
+            self._vision_model = vision
+            self._llama_model = resolve_ollama_model(LLAMA_MODEL)
+            # Fallback: si no hay llama, usar visión para texto no es válido; deja llama del launcher
             if not self._llama_model:
                 self._llama_model = self._vision_model
-            # text_model es el fallback genérico
-            self._text_model = self._vision_model or self._llama_model
+            # text_model es el fallback genérico (texto, no visión)
+            self._text_model = self._llama_model or self._vision_model
             logger.info(f"Modelos — visión/extractor: {self._vision_model}, clasificador/auditor: {self._llama_model}")
         return self._vision_model, self._llama_model
 
@@ -1287,14 +1303,13 @@ class DocumentPipelineAgent:
         # Para PDFs escaneados, convertir primera página a imagen para los agentes de visión
         if not is_image and ext == ".pdf" and vision_model:
             try:
-                from pdf2image import convert_from_path
-                images = convert_from_path(file_path, dpi=150, first_page=1, last_page=1)
-                if images:
+                page = render_pdf_page(file_path)
+                if page is not None:
                     import io as _io
                     buf = _io.BytesIO()
-                    images[0].convert("RGB").save(buf, format="JPEG", quality=80)
+                    page.convert("RGB").save(buf, format="JPEG", quality=90)
                     img_b64 = base64.b64encode(buf.getvalue()).decode()
-                    logger.info("PDF convertido a imagen para agentes de visión")
+                    logger.info("PDF convertido a imagen ampliada para agentes de visión")
             except Exception as e:
                 logger.debug(f"PDF to image: {e}")
 
@@ -1329,9 +1344,9 @@ class DocumentPipelineAgent:
         # El OCR no usa LLM — usa Tesseract/EasyOCR directamente
         # Produce: texto bruto que alimenta a todos los agentes siguientes
         ocr_running_msg = (
-            f"Procesando {original_filename} con moondream (Ollama vision)..."
+            f"Procesando {original_filename} con RapidOCR (fotos)..."
             if os.environ.get("RUN_BY_TAURI") == "1"
-            else f"Procesando {original_filename} con Tesseract multi-PSM + preprocesamiento..."
+            else f"Procesando {original_filename} con RapidOCR / Tesseract..."
         )
         yield self._emit("ocr", "running", {
             "title": "Agente OCR — Extracción de texto",
@@ -1355,7 +1370,7 @@ class DocumentPipelineAgent:
             ctx["ocr_text"] = ocr_result["text"]
             ctx["combined_text"] = ocr_result["text"]
             if _desktop_sidecar() and not ctx["combined_text"]:
-                logger.warning("Desktop OCR moondream devolvio texto vacio")
+                logger.warning("Desktop OCR no extrajo texto (RapidOCR/Tesseract/VLM)")
             # Guardar resultado del agente OCR
             ctx["agent_results"]["ocr"] = {
                 "metodo": ocr_result.get("method", "tesseract"),
@@ -1387,7 +1402,7 @@ class DocumentPipelineAgent:
         if _desktop_sidecar():
             yield self._emit("vision", "info", {
                 "title": "Agente Visual omitido (desktop)",
-                "message": "OCR neuronal (moondream) ya transcribio el documento; campos con modelo de texto.",
+                "message": "El OCR (RapidOCR) ya transcribió el documento; campos con modelo de texto.",
             })
         elif vision_model and img_b64:
             cfg_vision = self._get_agent_config("vision")
@@ -2130,12 +2145,18 @@ class DocumentPipelineAgent:
 
         # Montos
         def to_float(v) -> Optional[float]:
-            if v is None:
+            if v is None or isinstance(v, bool):
+                return None
+            text = str(v).strip().lower()
+            if text in {"", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity", "nan", "null", "none"}:
                 return None
             try:
-                return float(str(v).replace(",", ".").replace(" ", ""))
+                number = float(text.replace(",", ".").replace(" ", ""))
             except Exception:
                 return None
+            if not math.isfinite(number):
+                return None
+            return number
 
         # Estado
         estado = (EstadoRevision.PENDIENTE

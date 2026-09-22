@@ -54,6 +54,13 @@ REQ="requirements.txt"
 echo "==> Instalando dependencias de build desde $REQ (+ PyInstaller)"
 "$PY" -m pip install --quiet -r "$REQ" pyinstaller
 
+echo "==> Preparing RapidOCR ONNX models in data/ocr_models"
+export PYTHONPATH="$ROOT/server"
+export DATA_DIR="${DATA_DIR:-$ROOT/data}"
+if ! "$PY" -c "from agents.rapid_ocr import _build_engine; _build_engine()"; then
+  echo "WARNING: no se pudieron preparar modelos OCR (el sidecar intentará bajarlos al usar fotos)"
+fi
+
 echo "==> Empaquetando backend con PyInstaller"
 "$PY" -m PyInstaller --clean --noconfirm \
   --distpath desktop/backend/dist --workpath desktop/backend/build \

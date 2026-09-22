@@ -306,49 +306,120 @@ fn download_file(
     dest: &Path,
     progress: &mut impl FnMut(i32, &str),
 ) -> Result<(), String> {
-    let resp = http_agent()
-        .get(url)
-        .call()
-        .map_err(|e| format!("HTTP: {}", e))?;
-    if resp.status() < 200 || resp.status() >= 300 {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    let total = resp
-        .header("Content-Length")
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-    let mut reader = resp.into_reader();
     let tmp = dest.with_extension("part");
-    let mut file =
-        File::create(&tmp).map_err(|e| format!("No se pudo crear {}: {}", tmp.display(), e))?;
-    let mut buf = [0u8; 64 * 1024];
-    let mut copied: u64 = 0;
-    let mut last_pct: i32 = -1;
-    loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| format!("lectura: {}", e))?;
-        if n == 0 {
-            break;
+    let _ = fs::remove_file(&tmp);
+    let mut errors = Vec::new();
+
+    progress(-1, "Descargando Ollama con curl...");
+    match download_with_curl(url, &tmp).and_then(|()| validate_download(&tmp)) {
+        Ok(()) => return promote_download(&tmp, dest),
+        Err(e) => {
+            errors.push(e);
+            let _ = fs::remove_file(&tmp);
         }
-        file.write_all(&buf[..n])
-            .map_err(|e| format!("escritura: {}", e))?;
-        copied += n as u64;
-        if total > 0 {
-            let pct = ((copied.min(total) * 100) / total) as i32;
-            if pct != last_pct {
-                last_pct = pct;
-                progress(
-                    pct,
-                    &format!("Descargando Ollama (copia portable) — {}%", pct),
-                );
+    }
+
+    #[cfg(windows)]
+    {
+        progress(-1, "curl no disponible; intentando PowerShell...");
+        match download_with_powershell(url, &tmp).and_then(|()| validate_download(&tmp)) {
+            Ok(()) => return promote_download(&tmp, dest),
+            Err(e) => {
+                errors.push(e);
+                let _ = fs::remove_file(&tmp);
             }
         }
     }
-    file.flush().map_err(|e| e.to_string())?;
-    drop(file);
-    fs::rename(&tmp, dest).map_err(|e| format!("rename: {}", e))?;
-    Ok(())
+
+    Err(format!(
+        "fallaron los descargadores del sistema: {}",
+        errors.join("; ")
+    ))
+}
+
+fn download_with_curl(url: &str, tmp: &Path) -> Result<(), String> {
+    let program = if cfg!(windows) { "curl.exe" } else { "curl" };
+    let mut cmd = Command::new(program);
+    cmd.args([
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--proto",
+        "=https",
+        "--proto-redir",
+        "=https",
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        "21600",
+        "--retry",
+        "2",
+        "--retry-delay",
+        "2",
+        "--output",
+    ])
+    .arg(tmp)
+    .arg(url)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("{} termino con {}", program, status)),
+        Err(e) => Err(format!("no se pudo ejecutar {}: {}", program, e)),
+    }
+}
+
+#[cfg(windows)]
+fn download_with_powershell(url: &str, tmp: &Path) -> Result<(), String> {
+    let script = concat!(
+        "$ProgressPreference='SilentlyContinue';",
+        "$ErrorActionPreference='Stop';",
+        "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;",
+        "Invoke-WebRequest -UseBasicParsing ",
+        "-Uri $env:SMARTGASTOS_OLLAMA_URL ",
+        "-OutFile $env:SMARTGASTOS_OLLAMA_DEST"
+    );
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ])
+    .env("SMARTGASTOS_OLLAMA_URL", url)
+    .env("SMARTGASTOS_OLLAMA_DEST", tmp)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null())
+    .creation_flags(CREATE_NO_WINDOW);
+
+    match cmd.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("powershell.exe termino con {}", status)),
+        Err(e) => Err(format!("no se pudo ejecutar powershell.exe: {}", e)),
+    }
+}
+
+fn validate_download(path: &Path) -> Result<(), String> {
+    match fs::metadata(path) {
+        Ok(meta) if meta.is_file() && meta.len() > 0 => Ok(()),
+        Ok(_) => Err(format!("{} quedo vacio", path.display())),
+        Err(e) => Err(format!("{} no fue creado: {}", path.display(), e)),
+    }
+}
+
+fn promote_download(tmp: &Path, dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        fs::remove_file(dest)
+            .map_err(|e| format!("No se pudo reemplazar {}: {}", dest.display(), e))?;
+    }
+    fs::rename(tmp, dest).map_err(|e| format!("rename: {}", e))
 }
 
 fn safe_join(dest: &Path, name: &Path) -> Option<PathBuf> {
@@ -447,9 +518,62 @@ pub fn spawn_serve(bin: &Path, port: u16, models: &Path) -> io::Result<Child> {
     cmd.spawn()
 }
 
-/// Kill only the process tree of an Ollama we spawned. Never kill by process name.
-pub fn kill_owned_child(child: &mut Child) {
-    let pid = child.id();
+/// Kill whoever is LISTENING on `port` (orphan uvicorn after PyInstaller parent dies).
+pub fn kill_listeners_on_port(port: u16) {
+    #[cfg(windows)]
+    {
+        let Ok(output) = Command::new("netstat")
+            .args(["-ano", "-p", "tcp"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&output.stdout);
+        let port_s = port.to_string();
+        let mut pids = std::collections::BTreeSet::new();
+        for line in text.lines() {
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() < 5 || !cols.iter().any(|c| *c == "LISTENING") {
+                continue;
+            }
+            let local = cols[1];
+            let local_port = local.rsplit(':').next().unwrap_or("");
+            if local_port != port_s {
+                continue;
+            }
+            if let Ok(pid) = cols[cols.len() - 1].parse::<u32>() {
+                if pid > 0 {
+                    pids.insert(pid);
+                }
+            }
+        }
+        for pid in pids {
+            kill_pid_tree(pid);
+        }
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(output) = Command::new("lsof")
+            .args(["-iTCP", &format!(":{}", port), "-sTCP:LISTEN", "-t"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    if pid > 0 {
+                        kill_pid_tree(pid);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Kill a process and its descendants (Windows: taskkill /T /F).
+pub fn kill_pid_tree(pid: u32) {
     #[cfg(windows)]
     {
         let mut killer = Command::new("taskkill");
@@ -475,6 +599,11 @@ pub fn kill_owned_child(child: &mut Child) {
             .stderr(Stdio::null())
             .status();
     }
+}
+
+/// Kill only the process tree of an Ollama we spawned. Never kill by process name.
+pub fn kill_owned_child(child: &mut Child) {
+    kill_pid_tree(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }

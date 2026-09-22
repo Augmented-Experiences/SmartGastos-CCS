@@ -35,6 +35,15 @@ _defaults = ROOT / "defaults"
 if _defaults.is_dir():
     datas.append((str(_defaults), "defaults"))
 
+_ocr_models = ROOT / "data" / "ocr_models"
+if _ocr_models.is_dir() and any(_ocr_models.glob("*.onnx")):
+    datas.append((str(_ocr_models), "ocr_models"))
+else:
+    print(
+        "WARNING: data/ocr_models sin ONNX — el sidecar los bajará en el primer OCR",
+        file=sys.stderr,
+    )
+
 for _d in _pyi.get("extraDatas", []):
     _p = ROOT / _d
     if _p.exists():
@@ -63,18 +72,40 @@ hiddenimports = [
     "security",
     "hardware",
     "ollama_client",
-    "pipeline_agent",
     "agents",
     "agents.ocr_agent",
+    "agents.ocr_quality",
+    "agents.rapid_ocr",
     "agents.extractor_agent",
     "agents.classifier_agent",
     "agents.auditor_agent",
+    "rapidocr",
+    "onnxruntime",
+    "cv2",
+    "shapely",
+    "pyclipper",
+    "omegaconf",
 ]
+
+binaries = []
+try:
+    from PyInstaller.utils.hooks import collect_all
+
+    for _pkg in ("onnxruntime", "rapidocr", "cv2", "shapely", "pyclipper"):
+        try:
+            _d, _b, _h = collect_all(_pkg)
+            datas += _d
+            binaries += _b
+            hiddenimports += _h
+        except Exception as _exc:
+            print(f"WARNING: collect_all({_pkg}): {_exc}", file=sys.stderr)
+except Exception as _exc:
+    print(f"WARNING: PyInstaller hooks: {_exc}", file=sys.stderr)
 
 a = Analysis(
     [str(SERVER / "app.py")],
     pathex=[str(SERVER)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

@@ -110,6 +110,7 @@ class Documento(Base):
     iva = Column(Float, default=0.0)
     monto_total = Column(Float, default=0.0)
     moneda = Column(String(3), default="CLP")
+    tipo_cambio = Column(Float, default=1.0)  # 1 unidad de moneda = N de moneda_base
     
     # Clasificación
     categoria_id = Column(String(36), ForeignKey("categorias_contables.id"))

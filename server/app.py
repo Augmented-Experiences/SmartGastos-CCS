@@ -2,6 +2,7 @@
 SmartGastos — Backend FastAPI (plugin Pinokio + sidecar desktop SmartSuite).
 API para empresas, documentos, analítica y exportación.
 """
+import math
 import os
 import sys
 import json
@@ -361,6 +362,7 @@ class DocumentoUpdate(BaseModel):
     iva: Optional[float] = None
     monto_total: Optional[float] = None
     moneda: Optional[str] = None
+    tipo_cambio: Optional[float] = None
     tipo_documento: Optional[str] = None
 
     @field_validator('monto_neto', 'iva', 'monto_total')
@@ -369,6 +371,25 @@ class DocumentoUpdate(BaseModel):
         """Valida que los montos sean positivos si están presentes."""
         if v is not None and v < 0:
             raise ValueError("Los montos no pueden ser negativos")
+        return v
+
+    @field_validator('moneda')
+    @classmethod
+    def validate_moneda(cls, v):
+        if v is None:
+            return v
+        code = str(v).strip().upper()
+        if not _re.match(r'^[A-Z]{2,3}$', code):
+            raise ValueError("Moneda inválida")
+        return code
+
+    @field_validator('tipo_cambio')
+    @classmethod
+    def validate_tipo_cambio(cls, v):
+        if v is None:
+            return v
+        if not math.isfinite(v) or v <= 0:
+            raise ValueError("El tipo de cambio debe ser un número mayor a 0")
         return v
 
     @field_validator('estado_revision')
@@ -776,6 +797,37 @@ async def process_document_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _json_number(value):
+    """None si el float no es finito. Un Infinity guardado no debe tumbar el listado."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _fx_rate(doc, base: str) -> float:
+    """Cuántas unidades de moneda local vale 1 unidad del documento."""
+    moneda = (getattr(doc, "moneda", None) or base or "CLP").upper()
+    if moneda == (base or "CLP").upper():
+        return 1.0
+    rate = _json_number(getattr(doc, "tipo_cambio", None))
+    if rate is None or rate <= 0:
+        return 1.0
+    return rate
+
+
+def _local_amount(amount, rate: float):
+    number = _json_number(amount)
+    if number is None:
+        return None
+    return round(number * rate, 2)
+
+
 @app.get("/api/empresas/{empresa_id}/documentos")
 async def list_documents(empresa_id: str, limit: int = 50, offset: int = 0):
     """Lista documentos de una empresa."""
@@ -788,9 +840,12 @@ async def list_documents(empresa_id: str, limit: int = 50, offset: int = 0):
         total = db.query(Documento).filter(
             Documento.empresa_id == empresa_id
         ).count()
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        base = (empresa.moneda_base if empresa and empresa.moneda_base else "CLP").upper()
         
         return {
             "total": total,
+            "moneda_base": base,
             "documentos": [
                 {
                     "id": d.id,
@@ -801,14 +856,19 @@ async def list_documents(empresa_id: str, limit: int = 50, offset: int = 0):
                     "proveedor": d.proveedor,
                     "rut_proveedor": d.rut_proveedor,
                     "folio": d.folio,
-                    "monto_neto": float(d.monto_neto) if d.monto_neto else None,
-                    "iva": float(d.iva) if d.iva else None,
-                    "monto_total": float(d.monto_total) if d.monto_total else None,
+                    "moneda": (d.moneda or base).upper(),
+                    "tipo_cambio": _fx_rate(d, base),
+                    "monto_neto": _json_number(d.monto_neto),
+                    "iva": _json_number(d.iva),
+                    "monto_total": _json_number(d.monto_total),
+                    "monto_neto_local": _local_amount(d.monto_neto, _fx_rate(d, base)),
+                    "iva_local": _local_amount(d.iva, _fx_rate(d, base)),
+                    "monto_total_local": _local_amount(d.monto_total, _fx_rate(d, base)),
                     "tipo_documento": d.tipo_documento.value if d.tipo_documento else None,
                     "categoria_id": d.categoria_id,
                     "categoria_nombre": d.categoria.nombre if d.categoria else None,
                     "estado_revision": d.estado_revision.value if d.estado_revision else "pendiente",
-                    "confianza_clasificacion": d.confianza_clasificacion,
+                    "confianza_clasificacion": _json_number(d.confianza_clasificacion),
                     "categoria_sugerida": d.categoria.nombre if d.categoria else None,
                     "razon_clasificacion": d.categoria_sugerida if d.categoria_sugerida else None,
                     "texto_extraido": d.texto_extraido[:300] if d.texto_extraido else None,
@@ -846,6 +906,9 @@ async def get_document(empresa_id: str, doc_id: str):
         ruta = doc.ruta_archivo_original or ""
         ext = Path(ruta).suffix.lower().lstrip('.') if ruta else ""
         estado_val = doc.estado_revision.value.lower() if doc.estado_revision else "pendiente"
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        base = (empresa.moneda_base if empresa and empresa.moneda_base else "CLP").upper()
+        rate = _fx_rate(doc, base)
 
         # Parsear campos_extraidos: puede ser el formato nuevo {campos, agent_results}
         # o el formato viejo (dict plano de campos)
@@ -874,10 +937,15 @@ async def get_document(empresa_id: str, doc_id: str):
             "rut": doc.rut_proveedor,
             "rut_proveedor": doc.rut_proveedor,
             "folio": doc.folio,
-            "monto_neto": doc.monto_neto,
-            "iva": doc.iva,
-            "monto_total": doc.monto_total,
-            "moneda": doc.moneda,
+            "monto_neto": _json_number(doc.monto_neto),
+            "iva": _json_number(doc.iva),
+            "monto_total": _json_number(doc.monto_total),
+            "moneda": (doc.moneda or base).upper(),
+            "moneda_base": base,
+            "tipo_cambio": rate,
+            "monto_neto_local": _local_amount(doc.monto_neto, rate),
+            "iva_local": _local_amount(doc.iva, rate),
+            "monto_total_local": _local_amount(doc.monto_total, rate),
             "categoria": doc.categoria.nombre if doc.categoria else None,
             "categoria_nombre": doc.categoria.nombre if doc.categoria else None,
             "categoria_id": doc.categoria_id,
@@ -1001,6 +1069,8 @@ async def update_document(empresa_id: str, doc_id: str, update: DocumentoUpdate)
             doc.monto_total = update.monto_total
         if update.moneda is not None:
             doc.moneda = update.moneda
+        if update.tipo_cambio is not None:
+            doc.tipo_cambio = update.tipo_cambio
         if update.tipo_documento is not None:
             tipo_map = {
                 "FACTURA": TipoDocumento.FACTURA, "BOLETA": TipoDocumento.BOLETA,
@@ -1199,7 +1269,7 @@ async def download_export(filename: str):
 # ============================================================
 
 @app.get("/api/documentos/{doc_id}/preview")
-async def preview_document(doc_id: str):
+async def preview_document(doc_id: str, full: bool = False):
     """Devuelve la imagen de preview de un documento (imagen directa o thumbnail de PDF)."""
     import io
     from fastapi.responses import StreamingResponse, Response
@@ -1226,28 +1296,42 @@ async def preview_document(doc_id: str):
             with open(str(file_path), "rb") as f:
                 data = f.read()
             return Response(content=data, media_type="image/png", headers=headers)
+        elif ext in (".webp", ".gif", ".bmp", ".tif", ".tiff"):
+            media = {
+                ".webp": "image/webp",
+                ".gif": "image/gif",
+                ".bmp": "image/bmp",
+                ".tif": "image/tiff",
+                ".tiff": "image/tiff",
+            }[ext]
+            with open(str(file_path), "rb") as f:
+                data = f.read()
+            return Response(content=data, media_type=media, headers=headers)
         elif ext == ".pdf":
             # Intentar thumbnail con pdf2image, cacheado en disco
             thumb_dir = file_path.parent / "thumbnails"
             thumb_dir.mkdir(exist_ok=True)
-            thumb_path = thumb_dir / (file_path.stem + "_thumb.jpg")
+            suffix = "_ocr4800.jpg" if full else "_thumb.jpg"
+            thumb_path = thumb_dir / (file_path.stem + suffix)
             try:
-                # Usar thumbnail cacheado si existe y es más reciente que el PDF
                 if thumb_path.exists() and thumb_path.stat().st_mtime >= file_path.stat().st_mtime:
                     with open(str(thumb_path), "rb") as f:
                         data = f.read()
                     return Response(content=data, media_type="image/jpeg", headers=headers)
-                # Generar thumbnail
-                from pdf2image import convert_from_path
-                pages = convert_from_path(
-                    str(file_path), first_page=1, last_page=1,
-                    dpi=120, size=(800, None)  # ancho máx 800px, alto proporcional
-                )
-                if pages:
-                    # Guardar en disco para caché
-                    pages[0].save(str(thumb_path), format="JPEG", quality=82, optimize=True)
+                if full:
+                    from agents.ocr_agent import render_pdf_page
+                    page = render_pdf_page(str(file_path))
+                else:
+                    from pdf2image import convert_from_path
+                    pages = convert_from_path(
+                        str(file_path), first_page=1, last_page=1,
+                        dpi=120, size=(800, None)
+                    )
+                    page = pages[0] if pages else None
+                if page is not None:
+                    page.save(str(thumb_path), format="JPEG", quality=90, optimize=True)
                     img_io = io.BytesIO()
-                    pages[0].save(img_io, format="JPEG", quality=82)
+                    page.save(img_io, format="JPEG", quality=90)
                     img_io.seek(0)
                     return StreamingResponse(img_io, media_type="image/jpeg", headers=headers)
             except Exception as e:
@@ -1261,6 +1345,42 @@ async def preview_document(doc_id: str):
     except Exception as e:
         print(f"Error en preview: {e}")
         return Response(status_code=204)
+    finally:
+        db.close()
+
+
+class OcrRegionBody(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+
+    @field_validator("x", "y", "w", "h")
+    @classmethod
+    def validate_fraction(cls, value):
+        if not math.isfinite(value) or value < 0 or value > 1:
+            raise ValueError("La zona debe estar entre 0 y 1")
+        return value
+
+
+@app.post("/api/documentos/{doc_id}/ocr-region")
+async def ocr_document_region(doc_id: str, body: OcrRegionBody):
+    """Reconoce el texto de una zona marcada sobre la vista previa."""
+    if body.w < 0.01 or body.h < 0.01:
+        raise HTTPException(status_code=400, detail="La zona seleccionada es demasiado pequeña")
+    db = SessionLocal()
+    try:
+        doc = db.query(Documento).filter(Documento.id == doc_id).first()
+        if not doc or not doc.ruta_archivo_original:
+            raise HTTPException(status_code=404, detail="Documento no encontrado")
+        file_path = Path(doc.ruta_archivo_original).resolve()
+        if not validate_path_within(file_path, UPLOADS_DIR):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Archivo no encontrado")
+        from agents.ocr_agent import ocr_region_text
+        text = ocr_region_text(str(file_path), body.x, body.y, body.w, body.h)
+        return {"text": text}
     finally:
         db.close()
 

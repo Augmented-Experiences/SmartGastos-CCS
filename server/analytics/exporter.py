@@ -58,10 +58,32 @@ class ExportEngine:
         """Obtiene la empresa."""
         return self.db.query(Empresa).filter(Empresa.id == self.empresa_id).first()
 
+    def _fx_rate(self, doc) -> float:
+        try:
+            rate = float(getattr(doc, "tipo_cambio", None) or 1)
+        except (TypeError, ValueError):
+            return 1.0
+        if rate != rate or rate in (float("inf"), float("-inf")) or rate <= 0:
+            return 1.0
+        return rate
+
+    def _money(self, value, rate: float) -> float:
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        if number != number or number in (float("inf"), float("-inf")):
+            return 0.0
+        return round(number * rate, 2)
+
     def _build_rows(self, docs) -> List[Dict]:
-        """Construye las filas de datos para exportación."""
+        """Construye las filas de datos para exportación, en moneda local."""
+        empresa = self._get_empresa()
+        base = (empresa.moneda_base if empresa and empresa.moneda_base else "CLP").upper()
         rows = []
         for doc in docs:
+            moneda = (doc.moneda or base).upper()
+            rate = 1.0 if moneda == base else self._fx_rate(doc)
             rows.append({
                 "Fecha Emisión": doc.fecha_emision.strftime("%d/%m/%Y") if doc.fecha_emision else "",
                 "Tipo Documento": doc.tipo_documento.value if doc.tipo_documento else "",
@@ -71,10 +93,13 @@ class ExportEngine:
                 "Descripción": (doc.texto_extraido or "")[:100].replace("\n", " ").strip(),
                 "Categoría": doc.categoria.nombre if doc.categoria else "Sin asignar",
                 "Centro de Costo": doc.centro_costo.nombre if doc.centro_costo else "—",
-                "Moneda": doc.moneda or "CLP",
-                "Monto Neto": round(doc.monto_neto, 2) if doc.monto_neto else 0.0,
-                "IVA": round(doc.iva, 2) if doc.iva else 0.0,
-                "Monto Total": round(doc.monto_total, 2) if doc.monto_total else 0.0,
+                "Moneda origen": moneda,
+                "Tipo de cambio": rate,
+                "Moneda local": base,
+                "Monto Neto": self._money(doc.monto_neto, rate),
+                "IVA": self._money(doc.iva, rate),
+                "Monto Total": self._money(doc.monto_total, rate),
+                "Monto total origen": self._money(doc.monto_total, 1),
                 "Confianza IA": round(doc.confianza_clasificacion * 100, 0) if doc.confianza_clasificacion else 0,
                 "Estado": doc.estado_revision.value if doc.estado_revision else "pendiente",
                 "Alertas": self._format_exceptions(doc.excepciones),
@@ -104,7 +129,8 @@ class ExportEngine:
                 writer = csv.DictWriter(f, fieldnames=[
                     "Fecha Emisión", "Tipo Documento", "Folio / N°", "Proveedor",
                     "RUT / RUC", "Descripción", "Categoría", "Centro de Costo",
-                    "Moneda", "Monto Neto", "IVA", "Monto Total",
+                    "Moneda origen", "Tipo de cambio", "Moneda local",
+                    "Monto Neto", "IVA", "Monto Total", "Monto total origen",
                     "Confianza IA", "Estado", "Alertas", "Fecha Procesamiento"
                 ], delimiter=";")
                 writer.writeheader()
@@ -167,7 +193,7 @@ class ExportEngine:
 
         # Título
         empresa_name = empresa.nombre_fantasia or empresa.razon_social if empresa else "Empresa"
-        ws1.merge_cells("A1:P1")
+        ws1.merge_cells("A1:S1")
         title_cell = ws1["A1"]
         title_cell.value = f"Reporte de Gastos — {empresa_name}"
         title_cell.font = Font(name="Calibri", bold=True, size=16, color="0D3DA6")
@@ -175,7 +201,7 @@ class ExportEngine:
         ws1.row_dimensions[1].height = 35
 
         # Subtítulo
-        ws1.merge_cells("A2:P2")
+        ws1.merge_cells("A2:S2")
         sub_cell = ws1["A2"]
         sub_cell.value = f"Período: últimos {period_days} días | Generado: {datetime.utcnow().strftime('%d/%m/%Y %H:%M')} | Documentos: {len(docs)}"
         sub_cell.font = Font(name="Calibri", size=10, italic=True, color="666666")
@@ -186,10 +212,11 @@ class ExportEngine:
         headers = [
             "Fecha Emisión", "Tipo Documento", "Folio / N°", "Proveedor",
             "RUT / RUC", "Descripción", "Categoría", "Centro de Costo",
-            "Moneda", "Monto Neto", "IVA", "Monto Total",
+            "Moneda origen", "Tipo de cambio", "Moneda local",
+            "Monto Neto", "IVA", "Monto Total", "Monto total origen",
             "Confianza IA", "Estado", "Alertas", "Fecha Procesamiento"
         ]
-        col_widths = [14, 16, 12, 28, 16, 30, 18, 16, 8, 14, 14, 14, 12, 12, 25, 18]
+        col_widths = [14, 16, 12, 28, 16, 30, 18, 16, 14, 14, 12, 14, 14, 14, 16, 12, 12, 25, 18]
 
         for col_idx, (header, width) in enumerate(zip(headers, col_widths), 1):
             cell = ws1.cell(row=4, column=col_idx, value=header)
@@ -202,8 +229,8 @@ class ExportEngine:
         ws1.row_dimensions[4].height = 28
 
         # Datos
-        money_cols = {10, 11, 12}  # Monto Neto, IVA, Monto Total (1-indexed)
-        pct_col = 13  # Confianza IA
+        money_cols = {12, 13, 14, 15}  # Neto, IVA, Total local, Total origen
+        pct_col = 16  # Confianza IA
 
         for row_idx, row_data in enumerate(rows, 5):
             for col_idx, header in enumerate(headers, 1):

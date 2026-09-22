@@ -265,7 +265,7 @@ class TestUIFiles(unittest.TestCase):
         self.assertTrue((app_dir / "logo-ccs.png").exists(), "Falta app/logo-ccs.png (wordmark color)")
         self.assertTrue(
             (REPO_ROOT / "desktop" / "brand" / "ccs-mark.png").exists(),
-            "Falta desktop/brand/ccs-mark.png (mark blanco sobre negro)",
+            "Falta desktop/brand/ccs-mark.png (mark CCS para iconos)",
         )
         has_legacy = (
             (app_dir / "logo-ccs.svg").exists()
@@ -283,7 +283,6 @@ class TestUIFiles(unittest.TestCase):
         self.assertEqual(cfg.get("productName"), "SmartGastos")
         self.assertEqual(cfg.get("identifier"), "cl.ccs.smartgastos")
         self.assertEqual(cfg.get("accent"), "#00D53A")
-<<<<<<< ours
         self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.png")
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
         self.assertIn("moondream", extra)
@@ -293,19 +292,16 @@ class TestUIFiles(unittest.TestCase):
         self.assertIn('href="favicon.ico"', index)
         self.assertIn("logo-ccs.png", index)
         self.assertIn("ccs-about", index)
-        splash = (REPO_ROOT / "desktop" / "ui" / "splash.template.html").read_text(
+        canonical = (REPO_ROOT / "desktop" / "brand" / "splash.template.html").read_text(
             encoding="utf-8"
         )
-        self.assertIn("splash-mark", splash)
-        self.assertIn("splash-logo", splash)
-        self.assertIn('href="favicon.ico"', splash)
+        self.assertNotIn("splash-mark.png", canonical)
+        self.assertNotIn(".splash-mark", canonical)
+        self.assertNotIn('class="splash-mark"', canonical)
+        self.assertIn("splash-logo", canonical)
+        self.assertIn("{{LOGO_HTML}}", canonical)
+        self.assertIn('href="favicon.ico"', canonical)
 
-=======
-        self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.svg")
-        extra = (cfg.get("ollama") or {}).get("extraModels") or []
-        self.assertIn("moondream", extra)
-
->>>>>>> theirs
     def test_ccs_palette_is_applied_to_splash_and_installer_theme(self):
         expected_gradient = (
             "linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, "
@@ -338,13 +334,13 @@ class TestUIFiles(unittest.TestCase):
         joined = "\n".join(lines)
         self.assertNotIn("easyocr", joined)
         self.assertNotIn("torch", joined)
+        self.assertIn("rapidocr", joined)
+        self.assertIn("onnxruntime", joined)
 
     def test_launcher_uses_lightweight_desktop_requirements(self):
         setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
         self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
 
-<<<<<<< ours
-<<<<<<< ours
 
 class TestPortableOllama(unittest.TestCase):
     """La app de escritorio descarga Ollama portable; no usa MSI ni torch/OCR extra."""
@@ -368,7 +364,11 @@ class TestPortableOllama(unittest.TestCase):
         for banned in ("ollamasetup.exe", "winget", ".msi", "verysilent", "install.sh"):
             self.assertNotIn(banned, lowered, f"no debe invocar instalador de sistema ({banned})")
 
-    def test_prefers_healthy_system_daemon_and_records_owned_pid(self):
+    def test_sidecar_kills_backend_process_tree(self):
+        self.assertIn("kill_pid_tree", self.joined)
+        self.assertIn("taskkill", self.joined.lower())
+        self.assertIn("kill_pid_tree(pid)", self.main)
+        self.assertIn("kill_listeners_on_port", self.joined)
         self.assertIn("decide_listen_port", self.joined)
         self.assertIn("api/tags", self.ollama)
         self.assertIn("owned.pid", self.ollama)
@@ -376,12 +376,20 @@ class TestPortableOllama(unittest.TestCase):
         self.assertIn("kill_owned_child", self.joined)
         self.assertNotIn("Command::new(\"pkill\")", self.joined)
         self.assertNotIn("pkill -f", self.joined)
+        self.assertNotIn("cierre retenido", self.main)
+        self.assertNotIn("api.prevent_exit()", self.main)
+        self.assertIn("se cierra la ventana de todos modos", self.main)
 
     def test_sidecar_gets_ollama_url_and_continues_without_restart(self):
         self.assertIn('env("OLLAMA_URL"', self.main)
         self.assertIn("ensure_portable_binary", self.main)
         self.assertIn("spawn_serve", self.main)
         self.assertIn("finish_ollama_bootstrap", self.main)
+
+    def test_sidecar_passes_ollama_model_env(self):
+        self.assertIn('.env("OLLAMA_MODEL"', self.main)
+        self.assertIn("active_model.txt", self.main)
+        self.assertIn("let ram_model = model_for_ram()", self.main)
 
     def test_product_models_are_llama31_and_moondream(self):
         import json
@@ -395,11 +403,26 @@ class TestPortableOllama(unittest.TestCase):
         self.assertIn("extra_models", self.main)
         self.assertIn("model_for_ram", self.main)
 
+    def test_linux_docker_build_script_exists(self):
+        script = (REPO_ROOT / "desktop" / "scripts" / "linux-docker-build.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("AppImage", script)
+        self.assertIn(".deb", script)
+        self.assertIn(".rpm", script)
+        self.assertIn("build-backend.sh", script)
+        self.assertIn("ubuntu", script.lower())
+
     def test_splash_shows_ollama_progress(self):
         self.assertIn("/api/desktop-status", self.splash)
         self.assertIn("s.message", self.splash)
         self.assertIn("s.percent", self.splash)
         self.assertIn("ollamaDone", self.splash)
+        self.assertNotIn("Entrar ahora", self.splash)
+        self.assertNotIn("id=\"enter\"", self.splash)
+        self.assertIn("Cargando la aplicación...", self.splash)
+        self.assertNotIn("Use Entrar en el splash", self.main)
+        self.assertIn("Cargando la aplicación...", self.main)
 
     def test_desktop_requirements_still_exclude_easyocr_torch(self):
         lines = [
@@ -410,11 +433,45 @@ class TestPortableOllama(unittest.TestCase):
         joined = "\n".join(lines)
         self.assertNotIn("easyocr", joined)
         self.assertNotIn("torch", joined)
+        self.assertIn("rapidocr", joined)
+        cfg = json.loads(
+            (REPO_ROOT / "desktop" / "smartsuite.config.json").read_text(encoding="utf-8")
+        )
+        excludes = (cfg.get("pyinstaller") or {}).get("excludes") or []
+        self.assertNotIn("cv2", excludes)
+        self.assertIn("torch", excludes)
 
-=======
->>>>>>> theirs
-=======
->>>>>>> theirs
+
+class TestSplashSingleWhiteLogo(unittest.TestCase):
+
+    def test_splash_single_white_ccs_logo(self):
+        """Un solo logo CCS blanco; configure nunca emite splash-mark.png."""
+        self.assertTrue((REPO_ROOT / "desktop" / "brand" / "logo-ccs-white.png").exists())
+        canonical = (REPO_ROOT / "desktop" / "brand" / "splash.template.html").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("splash-mark.png", canonical)
+        self.assertNotIn(".splash-mark", canonical)
+        self.assertNotIn('class="splash-mark"', canonical)
+        self.assertIn("splash-logo", canonical)
+        self.assertIn("{{LOGO_HTML}}", canonical)
+        cfg_js = (REPO_ROOT / "desktop" / "scripts" / "configure.mjs").read_text(encoding="utf-8")
+        self.assertIn("logo-ccs-white.png", cfg_js)
+        self.assertIn("rmSync", cfg_js)
+        self.assertIn("brand/splash.template.html", cfg_js)
+        self.assertIn('features = ["tls"]', cfg_js)
+        self.assertIn('zip = "0.6"', cfg_js)
+        cargo = (REPO_ROOT / "desktop" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('features = ["tls"]', cargo)
+        self.assertIn('zip = "0.6"', cargo)
+        rust = (REPO_ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        self.assertIn('.env("OLLAMA_MODEL"', rust)
+        self.assertIn("active_model.txt", rust)
+        extra = json.loads(
+            (REPO_ROOT / "desktop" / "smartsuite.config.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("moondream", (extra.get("ollama") or {}).get("extraModels") or [])
+
 
 if __name__ == '__main__':
     unittest.main()

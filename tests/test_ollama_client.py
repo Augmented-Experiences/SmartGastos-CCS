@@ -99,5 +99,90 @@ class TestUsageTracking(unittest.TestCase):
             self.assertIn(field, stats, f"Campo faltante: {field}")
 
 
+class TestOllamaModelFallback(unittest.TestCase):
+    """Usa el modelo que el launcher ya bajó (no 503 en chat)."""
+
+    def test_resolve_uses_pulled_model_when_agent_model_missing(self):
+        from ollama_client import resolve_ollama_model
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {"models": [{"name": "llama3.1:8b"}]}
+        with patch("ollama_client.requests.get", return_value=tags):
+            with patch.dict(os.environ, {"OLLAMA_MODEL": "llama3.1:8b", "RUN_BY_TAURI": "1"}):
+                self.assertEqual(resolve_ollama_model("llama3.2:3b"), "llama3.1:8b")
+
+    def test_resolve_keeps_requested_when_present(self):
+        from ollama_client import resolve_ollama_model
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {
+            "models": [{"name": "llama3.2:3b"}, {"name": "llama3.1:8b"}]
+        }
+        with patch("ollama_client.requests.get", return_value=tags):
+            self.assertEqual(resolve_ollama_model("llama3.2:3b"), "llama3.2:3b")
+
+    def test_vision_resolve_keeps_moondream_not_text_llm(self):
+        from ollama_client import resolve_ollama_vision_model
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {
+            "models": [{"name": "llama3.1:8b"}, {"name": "moondream"}]
+        }
+        with patch("ollama_client.requests.get", return_value=tags):
+            self.assertEqual(resolve_ollama_vision_model("llama3.2-vision"), "moondream")
+            self.assertEqual(resolve_ollama_vision_model("moondream"), "moondream")
+
+    @patch("ollama_client.requests.post")
+    @patch("ollama_client.requests.get")
+    def test_call_ollama_generate_uses_ram_model_instead_of_503(self, mock_get, mock_post):
+        from ollama_client import call_ollama_generate
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {"models": [{"name": "llama3.1:8b"}]}
+        mock_get.return_value = tags
+        gen = MagicMock()
+        gen.status_code = 200
+        gen.encoding = "utf-8"
+        gen.json.return_value = {"response": "hola", "thinking": ""}
+        gen.raise_for_status = MagicMock()
+        mock_post.return_value = gen
+        with patch.dict(os.environ, {"OLLAMA_MODEL": "llama3.1:8b", "RUN_BY_TAURI": "1"}):
+            result = call_ollama_generate(
+                "llama3.2:3b",
+                "hi",
+                system="test",
+                skip_sanitization=True,
+            )
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(result.get("response"), "hola")
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "llama3.1:8b")
+
+    @patch("ollama_client.requests.post")
+    @patch("ollama_client.requests.get")
+    def test_ocr_generate_uses_moondream_from_tags(self, mock_get, mock_post):
+        from ollama_client import call_ollama_generate
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {
+            "models": [{"name": "llama3.1:8b"}, {"name": "moondream"}]
+        }
+        mock_get.return_value = tags
+        gen = MagicMock()
+        gen.status_code = 200
+        gen.encoding = "utf-8"
+        gen.json.return_value = {"response": "factura", "thinking": ""}
+        gen.raise_for_status = MagicMock()
+        mock_post.return_value = gen
+        with patch.dict(os.environ, {"OLLAMA_MODEL": "llama3.1:8b", "RUN_BY_TAURI": "1"}):
+            result = call_ollama_generate(
+                "moondream",
+                "transcribe",
+                images=["aaa"],
+                skip_sanitization=True,
+            )
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "moondream")
+
+
 if __name__ == '__main__':
     unittest.main()

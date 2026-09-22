@@ -3,6 +3,7 @@ Módulo de analítica para pyme-ledger-ai.
 Genera KPIs, vistas mensuales, rankings y análisis de gastos.
 """
 import json
+import math
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -10,6 +11,28 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from models import Documento, CategoriaContable, CentroCosto
+
+
+def money(value) -> float:
+    """0 si el monto es None, NaN o Infinity (no debe romper el JSON del dashboard)."""
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return number
+
+
+def fx_rate(doc) -> float:
+    """1 si no hay tipo de cambio. El cliente guarda 1 cuando la moneda es la local."""
+    rate = money(getattr(doc, "tipo_cambio", None) or 1)
+    return rate if rate > 0 else 1.0
+
+
+def local_amount(doc, attr: str) -> float:
+    """Monto del documento expresado en la moneda local de la empresa."""
+    return money(getattr(doc, attr, None)) * fx_rate(doc)
 
 
 class AnalyticsEngine:
@@ -48,9 +71,9 @@ class AnalyticsEngine:
             return self._get_empty_summary()
         
         # Cálculos básicos
-        total_gasto = sum(d.monto_total or 0 for d in docs)
-        total_iva = sum(d.iva or 0 for d in docs)
-        total_neto = sum(d.monto_neto or 0 for d in docs)
+        total_gasto = sum(local_amount(d, "monto_total") for d in docs)
+        total_iva = sum(local_amount(d, "iva") for d in docs)
+        total_neto = sum(local_amount(d, "monto_neto") for d in docs)
         
         # Documentos por estado
         pending_review = len([d for d in docs if d.estado_revision.value == "Pendiente"])
@@ -111,14 +134,14 @@ class AnalyticsEngine:
         
         for doc in docs:
             cat_name = doc.categoria.nombre if doc.categoria else "Sin categoría"
-            categories_data[cat_name]["total"] += doc.monto_total or 0
-            categories_data[cat_name]["iva"] += doc.iva or 0
-            categories_data[cat_name]["neto"] += doc.monto_neto or 0
+            categories_data[cat_name]["total"] += local_amount(doc, "monto_total")
+            categories_data[cat_name]["iva"] += local_amount(doc, "iva")
+            categories_data[cat_name]["neto"] += local_amount(doc, "monto_neto")
             categories_data[cat_name]["cantidad"] += 1
             categories_data[cat_name]["documentos"].append({
                 "id": doc.id,
                 "proveedor": doc.proveedor,
-                "monto": doc.monto_total,
+                "monto": local_amount(doc, "monto_total"),
                 "fecha": doc.fecha_emision.isoformat() if doc.fecha_emision else None
             })
         
@@ -178,7 +201,7 @@ class AnalyticsEngine:
         
         for doc in docs:
             prov_name = doc.proveedor or "Desconocido"
-            providers_data[prov_name]["total"] += doc.monto_total or 0
+            providers_data[prov_name]["total"] += local_amount(doc, "monto_total")
             providers_data[prov_name]["cantidad"] += 1
             providers_data[prov_name]["rut"] = doc.rut_proveedor
             if doc.categoria:
@@ -235,10 +258,10 @@ class AnalyticsEngine:
         
         for doc in docs:
             cc_name = doc.centro_costo.nombre if doc.centro_costo else "Sin asignar"
-            cost_centers_data[cc_name]["total"] += doc.monto_total or 0
+            cost_centers_data[cc_name]["total"] += local_amount(doc, "monto_total")
             cost_centers_data[cc_name]["cantidad"] += 1
             if doc.categoria:
-                cost_centers_data[cc_name]["categorias"][doc.categoria.nombre] += doc.monto_total or 0
+                cost_centers_data[cc_name]["categorias"][doc.categoria.nombre] += local_amount(doc, "monto_total")
         
         # Convertir a lista
         result = [
@@ -290,9 +313,9 @@ class AnalyticsEngine:
             else:
                 month_key = doc.fecha_creacion.strftime("%Y-%m")
             
-            monthly_data[month_key]["total"] += doc.monto_total or 0
-            monthly_data[month_key]["neto"] += doc.monto_neto or 0
-            monthly_data[month_key]["iva"] += doc.iva or 0
+            monthly_data[month_key]["total"] += local_amount(doc, "monto_total")
+            monthly_data[month_key]["neto"] += local_amount(doc, "monto_neto")
+            monthly_data[month_key]["iva"] += local_amount(doc, "iva")
             monthly_data[month_key]["cantidad"] += 1
         
         # Convertir a lista ordenada
@@ -418,7 +441,7 @@ class AnalyticsEngine:
         providers = defaultdict(float)
         for doc in docs:
             if doc.proveedor:
-                providers[doc.proveedor] += doc.monto_total or 0
+                providers[doc.proveedor] += local_amount(doc, "monto_total")
         
         if not providers:
             return None
@@ -434,7 +457,7 @@ class AnalyticsEngine:
         categories = defaultdict(float)
         for doc in docs:
             cat_name = doc.categoria.nombre if doc.categoria else "Sin categoría"
-            categories[cat_name] += doc.monto_total or 0
+            categories[cat_name] += local_amount(doc, "monto_total")
         
         if not categories:
             return None
@@ -449,8 +472,8 @@ class AnalyticsEngine:
         
         # Dividir en dos períodos
         mid = len(docs) // 2
-        first_half = sum(d.monto_total or 0 for d in docs[:mid])
-        second_half = sum(d.monto_total or 0 for d in docs[mid:])
+        first_half = sum(local_amount(d, "monto_total") for d in docs[:mid])
+        second_half = sum(local_amount(d, "monto_total") for d in docs[mid:])
         
         if first_half == 0:
             return "Sin datos"

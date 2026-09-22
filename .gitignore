@@ -15,3 +15,6 @@ Thumbs.db
 
 # Herramientas portables (descargadas por setup.py)
 tools/
+
+# Instaladores generados (Windows/Linux)
+dist/

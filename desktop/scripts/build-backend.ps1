@@ -67,6 +67,14 @@ if (Test-Path "requirements-desktop.txt") { $Req = "requirements-desktop.txt" }
 Write-Host "==> Installing build deps from $Req (+ PyInstaller)"
 & cmd /c "$Py -m pip install --quiet -r $Req pyinstaller"
 
+Write-Host "==> Ensuring RapidOCR ONNX models in data/ocr_models"
+$env:PYTHONPATH = "$Root\server"
+$env:DATA_DIR = "$Root\data"
+& cmd /c "$Py -c ""from agents.rapid_ocr import _build_engine; _build_engine()"""
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARNING: no se pudieron preparar modelos OCR (el sidecar intentará bajarlos al usar fotos)" -ForegroundColor Yellow
+}
+
 Write-Host "==> Packaging backend with PyInstaller"
 & cmd /c "$Py -m PyInstaller --clean --noconfirm --distpath desktop/backend/dist --workpath desktop/backend/build desktop/backend/backend.spec"
 

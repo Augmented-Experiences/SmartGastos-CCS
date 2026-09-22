@@ -3,7 +3,7 @@
   "publisher": "Cámara de Comercio de Santiago",
   "productName": "SmartGastos",
   "identifier": "cl.ccs.smartgastos",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "dataDirName": "SmartGastos",
   "accent": "#00D53A",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
@@ -18,10 +18,10 @@
       { "maxRamGb": 0, "model": "llama3.1:8b" }
     ],
     "extraModels": ["moondream"],
-    "$comment_extra": "moondream (~1.7 GB) es el modelo de visión que SmartGastos usa para OCR neuronal (auto-detectado). Se descarga con progreso en el arranque, igual que el modelo del LLM — así el OCR neuronal no requiere torch/easyocr en el instalador."
+    "$comment_extra": "moondream queda como último recurso visual. El OCR de fotos usa RapidOCR ONNX (latin); no se empaqueta easyocr/torch."
   },
   "pyinstaller": {
-    "$comment": "El OCR neuronal (easyocr → torch) es opcional y de carga diferida; se excluye para mantener el instalador liviano. El OCR con Tesseract (pytesseract) sigue disponible si el binario está presente.",
-    "excludes": ["easyocr", "torch", "torchvision", "scipy", "skimage", "scikit_image", "cv2", "ninja"]
+    "$comment": "EasyOCR/torch se excluyen. RapidOCR necesita OpenCV (cv2) y onnxruntime en el sidecar.",
+    "excludes": ["easyocr", "torch", "torchvision", "scipy", "skimage", "scikit_image", "ninja"]
   }
 }

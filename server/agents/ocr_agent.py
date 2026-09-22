@@ -2,14 +2,12 @@
 Agente OCR Multi-Estrategia para pyme-ledger-ai.
 
 Estrategias en orden de prioridad:
-  1. Para PDFs: PyPDF2 (texto digital) → pdf2image + Tesseract/EasyOCR
-  2. Para imágenes: Tesseract multi-PSM + preprocesamiento → EasyOCR → VLLM Ollama
+  1. Para PDFs: PyPDF2 (texto digital) → pdf2image + RapidOCR/Tesseract
+  2. Para fotos/imágenes: RapidOCR ONNX (latin) → Tesseract → EasyOCR (Pinokio)
+     → VLLM Ollama solo si el OCR clásico no sirvió y la salida no es alucinación.
 
-Modelos de visión soportados (via Ollama):
-  - moondream        (1.8B — muy ligero, bueno para texto impreso)
-  - llama3.2-vision  (11B — excelente para facturas y recibos)
-  - llava:7b         (7B  — bueno para documentos generales)
-  - granite3.2-vision (IBM — excelente para documentos empresariales)
+Moondream es un captioner, no un OCR: en fotos de boletas térmicas inventa
+texto. Esa salida se descarta (ver ocr_quality.looks_hallucinated).
 """
 
 import base64
@@ -20,6 +18,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Optional
+
+from .ocr_quality import (
+    MIN_WORDS as QUALITY_MIN_WORDS,
+    document_signal_score,
+    looks_hallucinated,
+    pick_ocr_result,
+    word_count as quality_word_count,
+)
+from .rapid_ocr import ocr_rapidocr
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +45,7 @@ VISION_MODELS_PREFERENCE = [
 ]
 
 # Umbral mínimo de palabras para considerar OCR exitoso
-MIN_WORDS = 10
+MIN_WORDS = QUALITY_MIN_WORDS
 
 
 def _sanitize_repetitive_ocr(text: str) -> str:
@@ -99,9 +106,7 @@ _tesseract_ok: Optional[bool] = None
 
 def _word_count(text: str) -> int:
     """Cuenta palabras alfanuméricas de más de 2 caracteres."""
-    if not text:
-        return 0
-    return len([w for w in text.split() if len(w) > 2 and any(c.isalnum() for c in w)])
+    return quality_word_count(text)
 
 
 def _tesseract_available() -> bool:
@@ -134,18 +139,15 @@ def _get_easyocr_reader():
 def _get_vision_model() -> Optional[str]:
     """Detecta qué modelo de visión está disponible en Ollama."""
     try:
-        import requests
-        resp = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
-        if resp.status_code != 200:
+        from ollama_client import (
+            resolve_ollama_vision_model,
+            _ollama_model_names,
+            _is_vision_name,
+        )
+        names = _ollama_model_names()
+        if not any(_is_vision_name(n) for n in names):
             return None
-        models_raw = resp.json().get('models', [])
-        available_names = {m['name'] for m in models_raw}
-        available_bases = {m['name'].split(':')[0] for m in models_raw}
-        for preferred in VISION_MODELS_PREFERENCE:
-            base = preferred.split(':')[0]
-            if preferred in available_names or base in available_bases:
-                return preferred
-        return None
+        return resolve_ollama_vision_model("moondream")
     except Exception:
         return None
 
@@ -295,6 +297,14 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
 
         if model is None:
             model = _get_vision_model()
+        else:
+            try:
+                from ollama_client import resolve_ollama_vision_model, _is_vision_name, _ollama_model_names
+                names = _ollama_model_names()
+                if any(_is_vision_name(n) for n in names):
+                    model = resolve_ollama_vision_model(model)
+            except Exception:
+                pass
         if model is None:
             logger.debug("No hay modelo de visión disponible en Ollama")
             return ""
@@ -349,12 +359,22 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
             text = _sanitize_repetitive_ocr(
                 resp.json().get("response", "").strip()
             )
-            if _word_count(text) >= MIN_WORDS:
+            if not text:
+                continue
+            if looks_hallucinated(text):
+                logger.warning(
+                    "VLLM (%s): salida descartada (alucinacion/caption): %s",
+                    model,
+                    (text[:160] + "…") if len(text) > 160 else text,
+                )
+                text = ""
+                continue
+            if _word_count(text) >= MIN_WORDS or document_signal_score(text) > 0:
                 break
         if text:
             logger.info("VLLM (%s): %s palabras", model, _word_count(text))
             return text
-        logger.warning("VLLM (%s): transcripcion vacia o muy corta", model)
+        logger.warning("VLLM (%s): transcripcion vacia, corta o alucinada", model)
         return ""
     except Exception as e:
         logger.warning("VLLM Ollama falló (model=%s): %s", model, e)
@@ -384,24 +404,111 @@ def ocr_pdf_digital(pdf_path: str) -> str:
         return ""
 
 
+PDF_OCR_DPI = 600
+OCR_MIN_LONG_SIDE = 4800
+
+
+def focus_document_image(image, min_long_side: int = OCR_MIN_LONG_SIDE):
+    """Recorta márgenes vacíos y amplía el documento si quedó chico para leerlo."""
+    from PIL import Image, ImageOps
+
+    rgb = image.convert("RGB")
+    gray = ImageOps.grayscale(rgb)
+    ink = gray.point(lambda p: 0 if p > 242 else 255)
+    bbox = ink.getbbox()
+    if bbox:
+        width, height = rgb.size
+        x0, y0, x1, y1 = bbox
+        content = (x1 - x0) * (y1 - y0)
+        if content < 0.85 * width * height:
+            pad_x = max(12, int((x1 - x0) * 0.03))
+            pad_y = max(12, int((y1 - y0) * 0.03))
+            rgb = rgb.crop((
+                max(0, x0 - pad_x),
+                max(0, y0 - pad_y),
+                min(width, x1 + pad_x),
+                min(height, y1 + pad_y),
+            ))
+    long_side = max(rgb.size)
+    if long_side and long_side < min_long_side:
+        scale = min(min_long_side / long_side, 8)
+        resample = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+        rgb = rgb.resize(
+            (max(1, int(rgb.size[0] * scale)), max(1, int(rgb.size[1] * scale))),
+            resample,
+        )
+    return rgb
+
+
+def render_pdf_page(pdf_path: str, dpi: int = PDF_OCR_DPI):
+    """Primera página del PDF, ya recortada y ampliada para OCR y vista previa."""
+    from pdf2image import convert_from_path
+
+    pages = convert_from_path(pdf_path, dpi=dpi, first_page=1, last_page=1)
+    if not pages:
+        return None
+    return focus_document_image(pages[0])
+
+
+def ocr_region_text(file_path: str, x: float, y: float, w: float, h: float) -> str:
+    """OCR de un recorte. En PDF las coordenadas son de la página ya enfocada."""
+    path = Path(file_path)
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        image = render_pdf_page(file_path)
+    else:
+        from PIL import Image
+        image = Image.open(file_path).convert("RGB")
+    if image is None:
+        return ""
+    width, height = image.size
+    x0 = int(max(0.0, min(1.0, x)) * width)
+    y0 = int(max(0.0, min(1.0, y)) * height)
+    x1 = int(max(0.0, min(1.0, x + w)) * width)
+    y1 = int(max(0.0, min(1.0, y + h)) * height)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return ""
+    crop = focus_document_image(image.crop((x0, y0, x1, y1)), min_long_side=3200)
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        crop.save(tmp.name, "PNG")
+        tmp_name = tmp.name
+    try:
+        result = run_image_ocr(
+            tmp_name,
+            allow_easyocr=not _is_desktop_sidecar(),
+            allow_vllm=False,
+        )
+        return (result.get("text") or "").strip()
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except Exception:
+            pass
+
+
 def ocr_pdf_scanned(pdf_path: str) -> str:
-    """Convierte PDF escaneado a imágenes y aplica OCR."""
+    """Convierte PDF escaneado a imágenes grandes y aplica OCR."""
     try:
         from pdf2image import convert_from_path
-        images = convert_from_path(pdf_path, dpi=200, first_page=1, last_page=3)
+        images = convert_from_path(pdf_path, dpi=PDF_OCR_DPI, first_page=1, last_page=3)
         all_text = []
         for img in images:
+            focused = focus_document_image(img)
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                img.save(tmp.name, 'PNG')
-                t = ocr_tesseract(tmp.name)
-                if _word_count(t) < MIN_WORDS:
-                    t = ocr_easyocr(tmp.name)
-                if t:
-                    all_text.append(t)
-                try:
-                    os.unlink(tmp.name)
-                except Exception:
-                    pass
+                focused.save(tmp.name, 'PNG')
+                tmp_name = tmp.name
+            page = run_image_ocr(
+                tmp_name,
+                allow_easyocr=not _is_desktop_sidecar(),
+                allow_vllm=False,
+            )
+            t = page.get("text") or ""
+            if t:
+                all_text.append(t)
+            try:
+                os.unlink(tmp_name)
+            except Exception:
+                pass
         return '\n\n--- PÁGINA SIGUIENTE ---\n\n'.join(all_text)
     except Exception as e:
         logger.debug(f"PDF escaneado OCR falló: {e}")
@@ -410,18 +517,79 @@ def ocr_pdf_scanned(pdf_path: str) -> str:
 
 # ── Clase principal ───────────────────────────────────────────────────────────
 
+def _ocr_enough(candidate: Dict) -> bool:
+    if not candidate or not candidate.get("text"):
+        return False
+    return candidate.get("signal", 0) > 0 or candidate.get("words", 0) >= MIN_WORDS
+
+
+def run_image_ocr(
+    img_path: str,
+    *,
+    allow_easyocr: bool = True,
+    allow_vllm: bool = True,
+    vision_model: Optional[str] = None,
+) -> Dict:
+    """
+    OCR de una imagen. RapidOCR primero; VLM solo si el clásico no sirvió.
+    """
+    strategies_tried: Dict[str, int] = {}
+    candidates = []
+
+    text_rapid = ocr_rapidocr(img_path)
+    wc_rapid = _word_count(text_rapid)
+    strategies_tried["rapidocr"] = wc_rapid
+    candidates.append({"text": text_rapid, "method": "rapidocr"})
+
+    best = pick_ocr_result(candidates)
+    if not _ocr_enough(best) and _tesseract_available():
+        text_tess = ocr_tesseract(img_path)
+        wc_tess = _word_count(text_tess)
+        strategies_tried["tesseract"] = wc_tess
+        if text_tess:
+            candidates.append({"text": text_tess, "method": "tesseract"})
+            best = pick_ocr_result(candidates)
+
+    if allow_easyocr and not _ocr_enough(best):
+        text_easy = ocr_easyocr(img_path)
+        wc_easy = _word_count(text_easy)
+        strategies_tried["easyocr"] = wc_easy
+        if text_easy:
+            candidates.append({"text": text_easy, "method": "easyocr"})
+            best = pick_ocr_result(candidates)
+
+    if allow_vllm and not _ocr_enough(best):
+        text_vllm = ocr_vllm_ollama(img_path, vision_model)
+        wc_vllm = _word_count(text_vllm)
+        method = f"vllm_{vision_model or 'auto'}"
+        strategies_tried[method] = wc_vllm
+        if text_vllm:
+            candidates.append({"text": text_vllm, "method": method})
+            best = pick_ocr_result(candidates)
+
+    method = best.get("method") or "none"
+    return {
+        "text": best.get("text") or "",
+        "method": method,
+        "words": best.get("words", _word_count(best.get("text") or "")),
+        "signal": best.get("signal", document_signal_score(best.get("text") or "")),
+        "strategies": strategies_tried,
+    }
+
+
 class OCRAgent:
     """
     Agente OCR multi-estrategia para documentos contables.
 
     Orden de estrategias para imágenes:
-      1. Tesseract (multi-PSM + preprocesamiento)
-      2. EasyOCR (si Tesseract da poco texto)
-      3. VLLM via Ollama (si las anteriores fallan)
+      1. RapidOCR ONNX (latin) — OCR real para fotos de boletas
+      2. Tesseract (si RapidOCR da poco texto)
+      3. EasyOCR (solo Pinokio / no sidecar)
+      4. VLLM via Ollama (último recurso; se descarta si alucina)
 
     Orden de estrategias para PDFs:
       1. PyPDF2 texto digital
-      2. pdf2image + Tesseract/EasyOCR
+      2. pdf2image + RapidOCR/Tesseract
     """
 
     def __init__(self, hardware_profile: str = "cpu"):
@@ -476,7 +644,11 @@ class OCRAgent:
 
         wc = _word_count(result.get("text", ""))
         result["word_count"] = wc
-        result["confidence"] = self._estimate_confidence(wc)
+        result["confidence"] = self._estimate_confidence(
+            wc,
+            signal=int(result.get("signal") or document_signal_score(result.get("text", ""))),
+            method=result.get("method") or "",
+        )
 
         logger.info(
             f"OCR completado — método: {result.get('method', '?')}, "
@@ -501,11 +673,10 @@ class OCRAgent:
         if vm:
             # Convertir primera página a imagen para el VLLM
             try:
-                from pdf2image import convert_from_path
-                images = convert_from_path(file_path, dpi=150, first_page=1, last_page=1)
-                if images:
+                page = render_pdf_page(file_path)
+                if page is not None:
                     with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                        images[0].save(tmp.name, 'JPEG', quality=85)
+                        page.save(tmp.name, 'JPEG', quality=90)
                         text = ocr_vllm_ollama(tmp.name, vm)
                         try:
                             os.unlink(tmp.name)
@@ -519,86 +690,39 @@ class OCRAgent:
         return {"text": text or "", "method": "pdf_partial"}
 
     def _process_image(self, file_path: str) -> Dict:
-        """Pipeline OCR para imágenes con múltiples estrategias."""
-        strategies_tried = {}
-
-        if _is_desktop_sidecar():
-            vm = self._get_vision_model_cached()
-            best_text, best_method, best_wc = "", "none", 0
-            if vm:
-                text_vllm = ocr_vllm_ollama(file_path, vm)
-                wc_vllm = _word_count(text_vllm)
-                strategies_tried[f"vllm_{vm}"] = wc_vllm
-                best_text, best_method, best_wc = text_vllm, f"vllm_{vm}", wc_vllm
-                logger.info(
-                    "Desktop OCR (Ollama %s): %s palabras en %s",
-                    vm,
-                    wc_vllm,
-                    file_path,
-                )
-            else:
-                logger.warning(
-                    "Desktop OCR: ningun modelo de vision en Ollama (esperado: moondream)"
-                )
-            if _tesseract_available() and best_wc < MIN_WORDS * 2:
-                text = ocr_tesseract(file_path)
-                wc = _word_count(text)
-                strategies_tried["tesseract"] = wc
-                if wc > best_wc:
-                    best_text, best_method, best_wc = text, "tesseract", wc
-            return {
-                "text": best_text,
-                "method": best_method,
-                "strategies": strategies_tried,
-            }
-
-        # Estrategia 1: Tesseract multi-PSM
-        text = ocr_tesseract(file_path)
-        wc = _word_count(text)
-        strategies_tried['tesseract'] = wc
-        if wc >= MIN_WORDS * 3:  # Resultado muy bueno → usar directamente
-            return {"text": text, "method": "tesseract",
-                    "strategies": strategies_tried}
-
-        # Estrategia 2: EasyOCR
-        text_easy = ocr_easyocr(file_path)
-        wc_easy = _word_count(text_easy)
-        strategies_tried['easyocr'] = wc_easy
-
-        # Elegir el mejor entre Tesseract y EasyOCR
-        if wc_easy > wc:
-            best_text, best_method = text_easy, "easyocr"
-            best_wc = wc_easy
-        else:
-            best_text, best_method = text, "tesseract"
-            best_wc = wc
-
-        if best_wc >= MIN_WORDS * 2:
-            return {"text": best_text, "method": best_method,
-                    "strategies": strategies_tried}
-
-        # Estrategia 3: VLLM via Ollama (para documentos difíciles)
+        """Pipeline OCR para imágenes: RapidOCR primero, VLM solo si hace falta."""
         vm = self._get_vision_model_cached()
-        if vm:
-            text_vllm = ocr_vllm_ollama(file_path, vm)
-            wc_vllm = _word_count(text_vllm)
-            strategies_tried[f'vllm_{vm}'] = wc_vllm
-            if wc_vllm > best_wc:
-                best_text, best_method = text_vllm, f"vllm_{vm}"
-                best_wc = wc_vllm
+        result = run_image_ocr(
+            file_path,
+            allow_easyocr=not _is_desktop_sidecar(),
+            allow_vllm=True,
+            vision_model=vm,
+        )
+        logger.info(
+            "OCR imagen %s: metodo=%s palabras=%s signal=%s estrategias=%s",
+            file_path,
+            result.get("method"),
+            result.get("words"),
+            result.get("signal"),
+            result.get("strategies"),
+        )
+        return result
 
-        return {"text": best_text, "method": best_method,
-                "strategies": strategies_tried}
-
-    def _estimate_confidence(self, word_count: int) -> float:
-        """Estima confianza basada en palabras extraídas."""
+    def _estimate_confidence(self, word_count: int, signal: int = 0, method: str = "") -> float:
+        """Estima confianza por palabras + señales de documento (RUT, TOTAL, …)."""
+        if (method or "") in ("none", "error", "unsupported") and word_count <= 0:
+            return 0.0
+        if signal >= 3 and word_count >= 10:
+            return 0.9
         if word_count >= 50:
             return 0.9
-        elif word_count >= 20:
+        if signal >= 2 and word_count >= MIN_WORDS:
+            return 0.8
+        if word_count >= 20:
             return 0.7
-        elif word_count >= MIN_WORDS:
+        if word_count >= MIN_WORDS or signal > 0:
             return 0.5
-        elif word_count > 0:
+        if word_count > 0:
             return 0.3
         return 0.0
 

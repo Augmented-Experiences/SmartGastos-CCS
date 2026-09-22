@@ -11,6 +11,8 @@ from typing import Dict, Optional
 from datetime import datetime
 import requests
 
+from ollama_client import resolve_ollama_model
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 TIMEOUT_EXTRACTION = int(os.getenv("OLLAMA_TIMEOUT_EXTRACTION", "60"))
 
@@ -212,7 +214,7 @@ Responde SOLO con JSON, sin markdown, sin explicaciones."""
         response = requests.post(
             f"{OLLAMA_URL}/api/chat",
             json={
-                "model": self.model,
+                "model": resolve_ollama_model(self.model),
                 "messages": [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": f"Extrae los campos de este documento:\n\n{text_limited}"}

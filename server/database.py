@@ -77,8 +77,28 @@ def get_db_session():
 def init_db():
     """Inicializa la base de datos creando todas las tablas."""
     Base.metadata.create_all(bind=engine)
+    _ensure_documento_columns()
     logger.info("Base de datos inicializada en: %s", DB_PATH)
     print(f"OK: Base de datos inicializada en: {DB_PATH}", flush=True)
+
+
+def _ensure_documento_columns():
+    """Agrega columnas nuevas en bases ya creadas (create_all no altera tablas)."""
+    from sqlalchemy import inspect, text
+
+    try:
+        inspector = inspect(engine)
+        if "documentos" not in inspector.get_table_names():
+            return
+        names = {col["name"] for col in inspector.get_columns("documentos")}
+        if "tipo_cambio" not in names:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE documentos ADD COLUMN tipo_cambio FLOAT DEFAULT 1.0"
+                ))
+            logger.info("Columna documentos.tipo_cambio agregada")
+    except Exception as exc:
+        logger.warning("No se pudo migrar documentos.tipo_cambio: %s", exc)
 
 
 def get_db() -> Session:

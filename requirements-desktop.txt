@@ -1,6 +1,8 @@
 # ============================================================
 # SmartGastos — Dependencias del instalador desktop (PyInstaller)
-# Subconjunto liviano: sin easyocr/torch (OCR vía Ollama vision / moondream).
+# Subconjunto liviano: sin easyocr/torch.
+# Fotos de boletas: RapidOCR + ONNX Runtime (latin). PDFs digitales: PyPDF2.
+# Moondream sigue en Ollama como último recurso; el pipeline descarta alucinaciones.
 # Pinokio sigue usando requirements.txt completo.
 # ============================================================
 
@@ -29,3 +31,8 @@ reportlab==4.2.5
 
 python-dateutil==2.9.0
 python-dotenv==1.0.1
+
+# OCR de fotos (sin torch). opencv llega como dependencia de rapidocr.
+# Primera ejecución descarga modelos latin a DATA_DIR/ocr_models (~20 MB).
+rapidocr==3.3.1
+onnxruntime==1.19.2

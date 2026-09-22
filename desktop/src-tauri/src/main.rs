@@ -5,26 +5,20 @@
 )]
 
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-<<<<<<< ours
-<<<<<<< ours
 use std::process::Child;
-=======
-use std::process::{Child, Command, Stdio};
->>>>>>> theirs
-=======
-use std::process::{Child, Command, Stdio};
->>>>>>> theirs
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{Emitter, Manager, RunEvent, Url, WindowEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 mod ollama;
+
+const SHUTDOWN_WAIT_ATTEMPTS: u32 = 25;
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +48,15 @@ struct BackendState(Mutex<Option<CommandChild>>);
 /// Solo contiene el proceso `ollama serve` lanzado por esta instancia.
 struct OllamaState(Mutex<Option<Child>>);
 struct ShutdownState(AtomicBool);
+struct BootstrapStarted(Mutex<Instant>);
+#[derive(Clone)]
+struct ShutdownTarget {
+    label: &'static str,
+    pid: u32,
+    port: Option<u16>,
+    clear_owned_pid: bool,
+}
+struct PendingStops(Mutex<Vec<ShutdownTarget>>);
 struct Navigated(Mutex<bool>);
 struct LastProbe(Mutex<String>);
 /// Puerto HTTP de Ollama para esta sesión (11434 u otro loopback).
@@ -118,14 +121,14 @@ fn navigate_to_backend(
     app: tauri::AppHandle,
     port: tauri::State<BackendPort>,
 ) -> Result<(), String> {
-    navigate_main_to_backend(&app, port.0)
+    open_splash_on_backend(&app, port.0)
 }
 
 #[tauri::command]
 fn retry_backend(app: tauri::AppHandle, port: tauri::State<BackendPort>) -> Result<String, String> {
     let p = port.0;
     if try_mark_backend_ready(&app, p) {
-        navigate_main_to_backend(&app, p)?;
+        open_splash_on_backend(&app, p)?;
         Ok(backend_app_url(p))
     } else {
         let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
@@ -198,51 +201,211 @@ fn backend_log(line: &str) {
     ollama_log(line);
 }
 
-fn kill_backend_child(state: &BackendState) {
-    let child = {
-        let mut slot = state.0.lock().unwrap();
-        slot.take()
-    };
-    if let Some(child) = child {
-        ollama_log("kill_backend_child: terminando sidecar backend");
-        match child.kill() {
-            Ok(()) => ollama_log("kill_backend_child: OK"),
-            Err(e) => ollama_log(&format!("kill_backend_child: {}", e)),
-        }
+fn process_is_alive(pid: u32) -> bool {
+    let pid = sysinfo::Pid::from_u32(pid);
+    let mut system = sysinfo::System::new();
+    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+    system.process(pid).is_some()
+}
+
+fn port_is_released(port: u16) -> bool {
+    if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+        return false;
+    }
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
+}
+
+fn register_shutdown_target(app: &tauri::AppHandle, target: ShutdownTarget) {
+    let pending = app.state::<PendingStops>();
+    let mut targets = pending.0.lock().unwrap();
+    if !targets
+        .iter()
+        .any(|known| known.label == target.label && known.pid == target.pid)
+    {
+        targets.push(target);
     }
 }
 
-fn kill_ollama_child(state: &OllamaState) {
-    let child = {
-        let mut slot = state.0.lock().unwrap();
-        slot.take()
-    };
-    if let Some(mut child) = child {
-<<<<<<< ours
-<<<<<<< ours
-        let pid = child.id();
-        ollama_log(&format!(
-            "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
-            pid
-        ));
-        ollama::kill_owned_child(&mut child);
+fn complete_shutdown_target(app: &tauri::AppHandle, target: &ShutdownTarget) {
+    if target.clear_owned_pid {
         ollama::clear_owned_pid(&user_data_dir());
-        ollama_log("kill_ollama_child: OK");
-=======
-=======
->>>>>>> theirs
-        ollama_log("kill_ollama_child: terminando Ollama iniciado por esta app");
-        match child.kill() {
-            Ok(()) => {
-                let _ = child.wait();
-                ollama_log("kill_ollama_child: OK");
-            }
-            Err(e) => ollama_log(&format!("kill_ollama_child: {}", e)),
+    }
+    let pending = app.state::<PendingStops>();
+    pending
+        .0
+        .lock()
+        .unwrap()
+        .retain(|known| known.label != target.label || known.pid != target.pid);
+}
+
+fn shutdown_target_released(target: &ShutdownTarget) -> (bool, bool) {
+    let pid_dead = !process_is_alive(target.pid);
+    let port_released = target.port.map(port_is_released).unwrap_or(true);
+    (pid_dead, port_released)
+}
+
+fn wait_for_owned_shutdown(app: &tauri::AppHandle, target: &ShutdownTarget) -> bool {
+    let mut pid_dead = false;
+    let mut port_released = target.port.is_none();
+    for i in 0..SHUTDOWN_WAIT_ATTEMPTS {
+        (pid_dead, port_released) = shutdown_target_released(target);
+        if pid_dead && port_released {
+            ollama_log(&format!(
+                "{}: pid={} terminado; puerto {:?} sin listener y enlazable",
+                target.label, target.pid, target.port
+            ));
+            complete_shutdown_target(app, target);
+            return true;
         }
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
+        // PyInstaller deja hijos (uvicorn). Si el PID padre ya murió, no retener
+        // la ventana por TIME_WAIT / un listener huérfano.
+        if pid_dead && i >= 5 {
+            ollama_log(&format!(
+                "{}: pid={} muerto; se cierra sin esperar el puerto {:?}",
+                target.label, target.pid, target.port
+            ));
+            complete_shutdown_target(app, target);
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    ollama_log(&format!(
+        "WARNING {}: espera agotada pid_dead={} port_released={} pid={} port={:?}",
+        target.label, pid_dead, port_released, target.pid, target.port
+    ));
+    complete_shutdown_target(app, target);
+    true
+}
+
+fn wait_for_pending_shutdown(app: &tauri::AppHandle) -> bool {
+    for i in 0..SHUTDOWN_WAIT_ATTEMPTS {
+        let targets = app.state::<PendingStops>().0.lock().unwrap().clone();
+        if targets.is_empty() {
+            return true;
+        }
+        for target in targets {
+            let (pid_dead, port_released) = shutdown_target_released(&target);
+            if pid_dead && (port_released || i >= 5) {
+                complete_shutdown_target(app, &target);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let targets = app.state::<PendingStops>().0.lock().unwrap().clone();
+    for target in &targets {
+        let (pid_dead, port_released) = shutdown_target_released(target);
+        ollama_log(&format!(
+            "WARNING cierre pendiente {}: pid_dead={} port_released={} pid={} port={:?}",
+            target.label, pid_dead, port_released, target.pid, target.port
+        ));
+        if pid_dead {
+            complete_shutdown_target(app, target);
+        }
+    }
+    true
+}
+
+fn stop_backend_child_registered(
+    app: &tauri::AppHandle,
+    child: CommandChild,
+    port: Option<u16>,
+) -> bool {
+    let pid = child.pid();
+    let target = ShutdownTarget {
+        label: "kill_backend_child",
+        pid,
+        port,
+        clear_owned_pid: false,
+    };
+    ollama_log(&format!(
+        "kill_backend_child: terminando sidecar backend (pid={})",
+        pid
+    ));
+    ollama::kill_pid_tree(pid);
+    if let Some(listen_port) = port {
+        ollama::kill_listeners_on_port(listen_port);
+    }
+    if let Err(e) = child.kill() {
+        ollama_log(&format!("kill_backend_child: kill pid={} {}", pid, e));
+    }
+    let stopped = wait_for_owned_shutdown(app, &target);
+    if stopped {
+        ollama_log("kill_backend_child: OK");
+    }
+    stopped
+}
+
+fn kill_backend_child(app: &tauri::AppHandle, port: Option<u16>) -> bool {
+    let child = {
+        let state = app.state::<BackendState>();
+        let mut slot = state.0.lock().unwrap();
+        let child = slot.take();
+        if let Some(child) = child.as_ref() {
+            register_shutdown_target(
+                app,
+                ShutdownTarget {
+                    label: "kill_backend_child",
+                    pid: child.pid(),
+                    port,
+                    clear_owned_pid: false,
+                },
+            );
+        }
+        child
+    };
+    if let Some(child) = child {
+        stop_backend_child_registered(app, child, port)
+    } else {
+        true
+    }
+}
+
+fn stop_ollama_child_registered(
+    app: &tauri::AppHandle,
+    mut child: Child,
+    port: Option<u16>,
+) -> bool {
+    let pid = child.id();
+    let target = ShutdownTarget {
+        label: "kill_ollama_child",
+        pid,
+        port,
+        clear_owned_pid: true,
+    };
+    ollama_log(&format!(
+        "kill_ollama_child: terminando Ollama iniciado por esta app (pid={})",
+        pid
+    ));
+    ollama::kill_owned_child(&mut child);
+    let stopped = wait_for_owned_shutdown(app, &target);
+    if stopped {
+        ollama_log("kill_ollama_child: OK");
+    }
+    stopped
+}
+
+fn kill_ollama_child(app: &tauri::AppHandle, port: Option<u16>) -> bool {
+    let child = {
+        let state = app.state::<OllamaState>();
+        let mut slot = state.0.lock().unwrap();
+        let child = slot.take();
+        if let Some(child) = child.as_ref() {
+            register_shutdown_target(
+                app,
+                ShutdownTarget {
+                    label: "kill_ollama_child",
+                    pid: child.id(),
+                    port,
+                    clear_owned_pid: true,
+                },
+            );
+        }
+        child
+    };
+    if let Some(child) = child {
+        stop_ollama_child_registered(app, child, port)
+    } else {
+        true
     }
 }
 
@@ -250,16 +413,31 @@ fn shutdown_requested(app: &tauri::AppHandle) -> bool {
     app.state::<ShutdownState>().0.load(Ordering::Acquire)
 }
 
-fn shutdown_app(app: &tauri::AppHandle, reason: &str) {
+fn ignore_stale_early_close(app: &tauri::AppHandle) -> bool {
+    let splash_started = *app.state::<Navigated>().0.lock().unwrap();
+    let started = *app.state::<BootstrapStarted>().0.lock().unwrap();
+    !splash_started && started.elapsed() < Duration::from_secs(2)
+}
+
+fn shutdown_app(app: &tauri::AppHandle, reason: &str) -> bool {
     if app.state::<ShutdownState>().0.swap(true, Ordering::AcqRel) {
-        return;
+        return wait_for_pending_shutdown(app);
     }
     ollama_log(&format!("shutdown_app: {}", reason));
-    // Bind the state before acquiring its Mutex to avoid a temporary State borrow.
-    let backend_state = app.state::<BackendState>();
-    kill_backend_child(&backend_state);
-    let ollama_state = app.state::<OllamaState>();
-    kill_ollama_child(&ollama_state);
+    let backend_port = app.try_state::<BackendPort>().map(|port| port.0);
+    let ollama_port = app.try_state::<OllamaListenPort>().map(|port| port.0);
+    let backend_stopped = kill_backend_child(app, backend_port);
+    let ollama_stopped = kill_ollama_child(app, ollama_port);
+    let pending_stopped = wait_for_pending_shutdown(app);
+    let stopped = backend_stopped && ollama_stopped && pending_stopped;
+    if stopped {
+        ollama_log("shutdown_app: procesos propios terminados y puertos liberados");
+    } else {
+        ollama_log(
+            "WARNING shutdown_app: timeout parcial; se cierra la ventana de todos modos",
+        );
+    }
+    true
 }
 
 fn pick_port() -> u16 {
@@ -282,9 +460,12 @@ fn splash_url(port: u16) -> String {
     format!("http://127.0.0.1:{}/__splash/", port)
 }
 
-fn wait_for_health(port: u16, attempts: u32) -> bool {
+fn wait_for_health(app: &tauri::AppHandle, port: u16, attempts: u32) -> bool {
     let health_url = format!("http://127.0.0.1:{}/api/health", port);
     for _ in 0..attempts {
+        if shutdown_requested(app) {
+            return false;
+        }
         match ureq::get(&health_url).call() {
             Ok(r) if r.status() == 200 => {
                 ollama_log("GET /api/health 200 — sidecar arriba");
@@ -310,24 +491,39 @@ fn navigate_webview_external(app: &tauri::AppHandle, url_str: &str) -> Result<()
     Ok(())
 }
 
-fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) {
+fn open_splash_on_backend(app: &tauri::AppHandle, port: u16) -> Result<(), String> {
+    if shutdown_requested(app) {
+        return Err("cierre en curso".into());
+    }
     let url = splash_url(port);
     let handle = app.clone();
     ollama_log(&format!("abriendo splash same-origin: {}", url));
-    match app.run_on_main_thread(move || {
+    app.run_on_main_thread(move || {
+        if shutdown_requested(&handle) {
+            ollama_log("open_splash_on_backend: cancelado por cierre");
+            return;
+        }
+        let navigated_state = handle.state::<Navigated>();
+        let mut navigated = navigated_state.0.lock().unwrap();
+        if *navigated {
+            return;
+        }
+        if let Err(e) = navigate_webview_external(&handle, &url) {
+            ollama_log(&format!("open_splash_on_backend navigate: {}", e));
+            return;
+        }
+        *navigated = true;
+        drop(navigated);
         if let Some(w) = handle.get_webview_window("main") {
             let _ = w.show();
             let _ = w.set_focus();
         } else {
-            ollama_log("open_splash_on_backend: ventana main no encontrada antes de navigate");
+            ollama_log("open_splash_on_backend: ventana main no encontrada despues de navigate");
         }
-        if let Err(e) = navigate_webview_external(&handle, &url) {
-            ollama_log(&format!("open_splash_on_backend navigate: {}", e));
-        }
-    }) {
-        Ok(()) => ollama_log("open_splash_on_backend: run_on_main_thread OK"),
-        Err(e) => ollama_log(&format!("open_splash_on_backend: run_on_main_thread {}", e)),
-    }
+    })
+    .map_err(|e| format!("open_splash_on_backend: run_on_main_thread {}", e))?;
+    ollama_log("open_splash_on_backend: run_on_main_thread OK");
+    Ok(())
 }
 
 struct ProbeResult {
@@ -397,6 +593,9 @@ fn probe_backend(port: u16) -> ProbeResult {
 
 fn wait_for_backend_ready(app: &tauri::AppHandle, port: u16, attempts: u32) -> bool {
     for _ in 0..attempts {
+        if shutdown_requested(app) {
+            return false;
+        }
         let probe = probe_backend(port);
         *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
         if probe.ok {
@@ -416,6 +615,8 @@ fn apply_backend_ready(app: &tauri::AppHandle, port: u16) {
         s.backend_error = None;
         if s.ollama_done {
             s.phase = "ready".into();
+            s.percent = 100;
+            s.message = "Abriendo la aplicación...".into();
         }
         // No pisar el progreso de descarga/extracción/arranque/pull de Ollama.
     });
@@ -431,34 +632,6 @@ fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
     } else {
         false
     }
-}
-
-fn navigate_main_to_backend(app: &tauri::AppHandle, port: u16) -> Result<(), String> {
-    if *app.state::<Navigated>().0.lock().unwrap() {
-        return Ok(());
-    }
-    let probe = probe_backend(port);
-    *app.state::<LastProbe>().0.lock().unwrap() = probe.detail.clone();
-    ollama_log(&format!(
-        "navigate_main_to_backend probe: ok={} {}",
-        probe.ok, probe.detail
-    ));
-    if !probe.ok {
-        update_status(app, |s| {
-            s.phase = "warning".into();
-            s.backend_error = Some(format!(
-                "El servidor local no respondio: {}. Revise logs/ollama.log y reconstruya backend.exe.",
-                probe.detail
-            ));
-        });
-        ollama_log("navigate_main_to_backend: omitido (health/UI probe fallo)");
-        return Err(probe.detail);
-    }
-    let _ = try_mark_backend_ready(app, port);
-    let url_str = backend_app_url(port);
-    navigate_webview_external(app, &url_str)?;
-    *app.state::<Navigated>().0.lock().unwrap() = true;
-    Ok(())
 }
 
 fn model_for_ram() -> String {
@@ -486,20 +659,55 @@ fn status_progress(app: &tauri::AppHandle, phase: &str, percent: i32, message: &
     });
 }
 
-fn take_owned_slot(app: &tauri::AppHandle, mut child: Child) -> bool {
+fn take_owned_slot(app: &tauri::AppHandle, child: Child, port: u16) -> bool {
     let pid = child.id();
     let ollama_state = app.state::<OllamaState>();
     let mut slot = ollama_state.0.lock().unwrap();
     if shutdown_requested(app) {
+        register_shutdown_target(
+            app,
+            ShutdownTarget {
+                label: "kill_ollama_child",
+                pid,
+                port: Some(port),
+                clear_owned_pid: true,
+            },
+        );
         drop(slot);
-        ollama::kill_owned_child(&mut child);
-        ollama::clear_owned_pid(&user_data_dir());
+        stop_ollama_child_registered(app, child, Some(port));
         return false;
     }
-    if let Some(mut previous) = slot.replace(child) {
-        ollama::kill_owned_child(&mut previous);
+    if let Some(previous) = slot.take() {
+        register_shutdown_target(
+            app,
+            ShutdownTarget {
+                label: "kill_ollama_child",
+                pid: previous.id(),
+                port: Some(port),
+                clear_owned_pid: true,
+            },
+        );
+        drop(slot);
+        stop_ollama_child_registered(app, previous, Some(port));
+        slot = ollama_state.0.lock().unwrap();
+        if shutdown_requested(app) {
+            register_shutdown_target(
+                app,
+                ShutdownTarget {
+                    label: "kill_ollama_child",
+                    pid,
+                    port: Some(port),
+                    clear_owned_pid: true,
+                },
+            );
+            drop(slot);
+            stop_ollama_child_registered(app, child, Some(port));
+            return false;
+        }
     }
+    slot.replace(child);
     ollama::record_owned_pid(&user_data_dir(), pid);
+    drop(slot);
     ollama_log(&format!(
         "Ollama portable iniciado por esta instancia (pid={})",
         pid
@@ -519,22 +727,37 @@ fn finish_ollama_bootstrap(app: &tauri::AppHandle, backend_port: u16) {
 
     update_status(app, |s| {
         s.ollama_done = true;
-        s.percent = 100;
-        s.message = "Modelos listos. Abriendo la aplicacion...".into();
+        s.backend_error = None;
         if s.can_continue {
+            s.percent = 100;
             s.phase = "ready".into();
+            s.message = "Abriendo la aplicación...".into();
             if s.backend_url.is_none() {
                 s.backend_url = Some(backend_app_url(backend_port));
             }
         } else {
             let detail = app.state::<LastProbe>().0.lock().unwrap().clone();
-            s.backend_error = Some(format!(
-                "UI aun no lista: {}. Use Entrar en el splash.",
+            ollama_log(&format!(
+                "UI aun no lista (se sigue esperando, sin mostrar el error): {}",
                 detail
             ));
+            s.percent = -1;
+            s.phase = "loading-ui".into();
+            s.message = "Cargando la aplicación...".into();
         }
     });
-    ollama_log("ollama_done=true; splash debe hacer location.replace('/') via /api/desktop-status");
+    ollama_log("ollama_done=true; splash espera can_continue y luego location.replace('/')");
+}
+
+fn finish_ollama_failure(app: &tauri::AppHandle, backend_port: u16) {
+    let _ = try_mark_backend_ready(app, backend_port);
+    update_status(app, |s| {
+        s.ollama_done = false;
+        s.percent = -1;
+        s.phase = "warning".into();
+        s.backend_error = Some(s.message.clone());
+    });
+    ollama_log("ollama_done=false; el fallo no se publica como 100%");
 }
 
 fn bootstrap_ollama(
@@ -545,34 +768,10 @@ fn bootstrap_ollama(
 ) {
     std::thread::spawn(move || {
         if shutdown_requested(&app) {
-<<<<<<< ours
-<<<<<<< ours
-=======
-=======
->>>>>>> theirs
-            return;
-        }
-        update_status(&app, |s| {
-            s.phase = "ollama".into();
-            s.message = "Verificando el motor de IA (Ollama)...".into();
-            s.percent = -1;
-        });
-
-        let installed = ollama_command()
-            .arg("--version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !installed {
-            finish_ollama_bootstrap(&app, backend_port);
->>>>>>> theirs
             return;
         }
         status_progress(&app, "ollama", -1, "Verificando el motor de IA (Ollama)...");
 
-<<<<<<< ours
         let data_dir = user_data_dir();
         if already_healthy {
             ollama_log(&format!(
@@ -601,7 +800,7 @@ fn bootstrap_ollama(
                         match ollama::spawn_serve(&bin, ollama_port, &ollama::models_dir(&data_dir))
                         {
                             Ok(child) => {
-                                if !take_owned_slot(&app, child) {
+                                if !take_owned_slot(&app, child, ollama_port) {
                                     return;
                                 }
                             }
@@ -611,9 +810,9 @@ fn bootstrap_ollama(
                                     &app,
                                     "warning",
                                     -1,
-                                    "No se pudo iniciar Ollama. La app continuara sin IA.",
+                                    "No se pudo iniciar Ollama. Revise logs/ollama.log.",
                                 );
-                                finish_ollama_bootstrap(&app, backend_port);
+                                finish_ollama_failure(&app, backend_port);
                                 return;
                             }
                         }
@@ -623,9 +822,9 @@ fn bootstrap_ollama(
                                 &app,
                                 "warning",
                                 -1,
-                                "Ollama no respondio a tiempo. La app continuara sin IA.",
+                                "Ollama no respondio a tiempo. Revise logs/ollama.log.",
                             );
-                            finish_ollama_bootstrap(&app, backend_port);
+                            finish_ollama_failure(&app, backend_port);
                             return;
                         }
                         ollama_log(&format!(
@@ -640,40 +839,12 @@ fn bootstrap_ollama(
                         &app,
                         "warning",
                         -1,
-                        "No se pudo descargar Ollama. La app continuara sin IA.",
+                        "No se pudo descargar Ollama. Revise logs/ollama.log.",
                     );
-=======
-        if TcpStream::connect(("127.0.0.1", 11434)).is_err() {
-            let mut cmd = ollama_command();
-            cmd.arg("serve").stdout(Stdio::null()).stderr(Stdio::null());
-            match cmd.spawn() {
-                Ok(mut child) => {
-                    let ollama_state = app.state::<OllamaState>();
-                    let mut slot = ollama_state.0.lock().unwrap();
-                    if shutdown_requested(&app) {
-                        drop(slot);
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        return;
-                    }
-                    if let Some(mut previous) = slot.replace(child) {
-                        let _ = previous.kill();
-                        let _ = previous.wait();
-                    }
-                    ollama_log("Ollama iniciado por esta instancia");
-                }
-                Err(e) => {
-                    ollama_log(&format!("No se pudo iniciar Ollama: {}", e));
-<<<<<<< ours
->>>>>>> theirs
-=======
->>>>>>> theirs
-                    finish_ollama_bootstrap(&app, backend_port);
+                    finish_ollama_failure(&app, backend_port);
                     return;
                 }
             }
-<<<<<<< ours
-<<<<<<< ours
         }
 
         if shutdown_requested(&app) {
@@ -681,20 +852,26 @@ fn bootstrap_ollama(
         }
         if !ollama::api_healthy(ollama_port) {
             ollama_log("API de Ollama no saludable; se omite pull");
-            finish_ollama_bootstrap(&app, backend_port);
+            status_progress(
+                &app,
+                "warning",
+                -1,
+                "Ollama no esta disponible. Revise logs/ollama.log.",
+            );
+            finish_ollama_failure(&app, backend_port);
             return;
-=======
-=======
->>>>>>> theirs
-            wait_for_port(11434, 30);
->>>>>>> theirs
         }
 
-        if shutdown_requested(&app) {
-            return;
-        }
         let model = model_for_ram();
-        let _ = pull_model_with_progress(&app, ollama_port, &model);
+        if pull_model_with_progress(&app, ollama_port, &model) {
+            let marker = ollama::ollama_home(&user_data_dir()).join("active_model.txt");
+            let _ = std::fs::create_dir_all(ollama::ollama_home(&user_data_dir()));
+            let _ = std::fs::write(&marker, &model);
+            ollama_log(&format!(
+                "Modelo {} listo en /api/tags; chat debe usar este si el agente pide otro",
+                model
+            ));
+        }
 
         for extra in &app_config().extra_models {
             if shutdown_requested(&app) {
@@ -721,6 +898,8 @@ fn main() {
         .manage(BackendState(Mutex::new(None)))
         .manage(OllamaState(Mutex::new(None)))
         .manage(ShutdownState(AtomicBool::new(false)))
+        .manage(BootstrapStarted(Mutex::new(Instant::now())))
+        .manage(PendingStops(Mutex::new(Vec::new())))
         .manage(AppStatus(Mutex::new(Status::initial())))
         .manage(Navigated(Mutex::new(false)))
         .manage(LastProbe(Mutex::new(String::new())))
@@ -731,11 +910,11 @@ fn main() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            *handle.state::<BootstrapStarted>().0.lock().unwrap() = Instant::now();
             *handle.state::<Navigated>().0.lock().unwrap() = false;
             persist_status_snapshot(&Status::initial());
 
-            let backend_state = app.state::<BackendState>();
-            kill_backend_child(&backend_state);
+            kill_backend_child(&handle, None);
             let port = pick_port();
             app.manage(BackendPort(port));
             ollama_log(&format!("Puerto backend elegido: {}", port));
@@ -755,6 +934,12 @@ fn main() {
             }
             let ollama_url = ollama::api_base(ollama_port);
             let ollama_host = format!("127.0.0.1:{}", ollama_port);
+            let ram_model = model_for_ram();
+            ollama_log(&format!(
+                "sidecar env OLLAMA_URL={} OLLAMA_MODEL={} (agentes deben usar este si su modelo no esta)",
+                ollama_url,
+                ram_model
+            ));
             let sidecar = app.shell().sidecar("backend");
             match sidecar {
                 Ok(cmd) => match cmd
@@ -764,19 +949,54 @@ fn main() {
                     .env("PYTHONIOENCODING", "utf-8")
                     .env("OLLAMA_URL", ollama_url)
                     .env("OLLAMA_HOST", ollama_host)
+                    .env("OLLAMA_MODEL", ram_model)
                     .spawn()
                 {
                     Ok((mut rx, child)) => {
                         let backend_state = app.state::<BackendState>();
                         let mut slot = backend_state.0.lock().unwrap();
                         if shutdown_requested(&handle) {
+                            register_shutdown_target(
+                                &handle,
+                                ShutdownTarget {
+                                    label: "kill_backend_child",
+                                    pid: child.pid(),
+                                    port: Some(port),
+                                    clear_owned_pid: false,
+                                },
+                            );
                             drop(slot);
-                            let _ = child.kill();
+                            stop_backend_child_registered(&handle, child, Some(port));
                             return Ok(());
                         }
-                        if slot.is_some() {
+                        if let Some(previous) = slot.take() {
                             ollama_log("WARN: sidecar slot ocupado; matando instancia duplicada");
-                            let _ = slot.take().map(|c| c.kill());
+                            register_shutdown_target(
+                                &handle,
+                                ShutdownTarget {
+                                    label: "kill_backend_child",
+                                    pid: previous.pid(),
+                                    port: Some(port),
+                                    clear_owned_pid: false,
+                                },
+                            );
+                            drop(slot);
+                            stop_backend_child_registered(&handle, previous, Some(port));
+                            slot = backend_state.0.lock().unwrap();
+                            if shutdown_requested(&handle) {
+                                register_shutdown_target(
+                                    &handle,
+                                    ShutdownTarget {
+                                        label: "kill_backend_child",
+                                        pid: child.pid(),
+                                        port: Some(port),
+                                        clear_owned_pid: false,
+                                    },
+                                );
+                                drop(slot);
+                                stop_backend_child_registered(&handle, child, Some(port));
+                                return Ok(());
+                            }
                         }
                         slot.replace(child);
                         let sidecar_handle = handle.clone();
@@ -789,8 +1009,7 @@ fn main() {
                                 }
                             }
                             ollama_log("sidecar backend: canal de eventos cerrado (proceso terminó?)");
-                            let backend_state = sidecar_handle.state::<BackendState>();
-                            kill_backend_child(&backend_state);
+                            kill_backend_child(&sidecar_handle, Some(port));
                         });
                     }
                     Err(e) => {
@@ -814,20 +1033,19 @@ fn main() {
 
             let splash_handle = handle.clone();
             std::thread::spawn(move || {
-                if wait_for_health(port, 120) {
-                    open_splash_on_backend(&splash_handle, port);
-                } else {
+                if wait_for_health(&splash_handle, port, 120) {
+                    if let Err(e) = open_splash_on_backend(&splash_handle, port) {
+                        ollama_log(&format!("open_splash_on_backend: {}", e));
+                    }
+                } else if !shutdown_requested(&splash_handle) {
                     ollama_log(
                         "ERROR: /api/health no respondio; sidecar caido (revise traceback en este log)",
                     );
                     update_status(&splash_handle, |s| {
-                        s.phase = "warning".into();
-                        s.message = "El servidor local no inicio.".into();
-                        s.backend_error = Some(
-                            "El sidecar (backend.exe) termino antes de escuchar. \
-                             Reconstruya con build-backend.ps1 y revise logs/ollama.log."
-                                .into(),
-                        );
+                        s.phase = "loading-ui".into();
+                        s.percent = -1;
+                        s.message = "Cargando la aplicación...".into();
+                        s.backend_error = None;
                     });
                 }
             });
@@ -848,19 +1066,30 @@ fn main() {
         .run(|app_handle, event| {
             match event {
                 RunEvent::ExitRequested { .. } => {
-                    shutdown_app(app_handle, "RunEvent::ExitRequested");
+                    let _ = shutdown_app(app_handle, "RunEvent::ExitRequested");
                 }
                 RunEvent::Exit => {
-                    shutdown_app(app_handle, "RunEvent::Exit");
+                    let _ = shutdown_app(app_handle, "RunEvent::Exit");
                 }
                 RunEvent::WindowEvent { label, event, .. } if label == "main" => {
                     match event {
-                        WindowEvent::CloseRequested { .. } => {
-                            shutdown_app(app_handle, "RunEvent::WindowEvent CloseRequested");
+                        WindowEvent::CloseRequested { api, .. } => {
+                            if ignore_stale_early_close(app_handle) {
+                                api.prevent_close();
+                                ollama_log(
+                                    "CloseRequested temprano ignorado hasta iniciar el splash",
+                                );
+                                return;
+                            }
+                            let _ = shutdown_app(
+                                app_handle,
+                                "RunEvent::WindowEvent CloseRequested",
+                            );
                             app_handle.exit(0);
                         }
                         WindowEvent::Destroyed => {
-                            shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
+                            let _ =
+                                shutdown_app(app_handle, "RunEvent::WindowEvent Destroyed");
                             app_handle.exit(0);
                         }
                         _ => {}

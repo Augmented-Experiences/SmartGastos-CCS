@@ -3,6 +3,9 @@
 
   En desktop Tauri: se sirve desde FastAPI en /__splash (mismo origen que la app).
   Tras Ollama: location.replace('/') — sin WebviewWindow.navigate ni invoke.
+  Logo splash: solo el isotipo CCS blanco (brand/logo-ccs-white.png). Un solo logo.
+  splash-mark ya no se usa (el segundo logo 404).
+  Marca: desktop/smartsuite.config.json (SmartGastos, accent #00D53A).
 -->
 <!DOCTYPE html>
 <html lang="es">
@@ -14,44 +17,29 @@
   <link rel="stylesheet" href="ccs-theme.css" />
   <link rel="stylesheet" href="accent.css" />
   <style>
-    :root { --navy: var(--ccs-azul-oscuro); --mid: var(--ccs-azul); --accent: var(--ccs-accent); }
+    :root { --navy: var(--ccs-azul-oscuro); --accent: var(--ccs-accent); --gradient: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: linear-gradient(126.54deg, rgb(0, 215, 0) -3.03%, rgb(0, 86, 202) 56.75%);
+      background: var(--gradient);
       color: #fff; display: flex; flex-direction: column; align-items: center;
       justify-content: center; height: 100vh; text-align: center; gap: 20px; padding: 24px;
     }
-    .splash-mark { width: 72px; height: 72px; object-fit: cover; border-radius: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.28); }
-    .splash-logo { height: 52px; width: auto; max-width: 280px; object-fit: contain; background: #fff; padding: 10px 16px; border-radius: 12px; }
+    .splash-logo { height: 64px; width: auto; max-width: min(280px, 70vw); object-fit: contain; display: block; }
     .brand { font-size: 34px; font-weight: 800; letter-spacing: 0.5px; }
     .brand .accent { color: var(--accent); }
     .sub { color: #c7d3ec; font-size: 14px; max-width: 460px; line-height: 1.5; }
     .track { width: 300px; max-width: 80vw; height: 8px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,0.15); position: relative; }
-    .fill { height: 100%; width: 0%; border-radius: 8px; background: var(--ccs-gradient); transition: width 0.4s ease; }
+    .fill { height: 100%; width: 0%; border-radius: 8px; background: var(--gradient); transition: width 0.4s ease; }
     .track.indeterminate .fill { width: 40% !important; position: absolute; left: -40%; animation: slide 1.2s infinite ease-in-out; }
     @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
     .status { color: #dbe6ff; font-size: 13px; min-height: 18px; max-width: 460px; }
     .pct { color: var(--accent); font-weight: 700; font-size: 13px; min-height: 16px; }
-    .enter {
-      margin-top: 12px; padding: 14px 32px; border-radius: 12px; border: 0; cursor: pointer;
-      background: var(--ccs-gradient); color: var(--navy);
-      font-weight: 800; font-size: 18px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
-    }
-    .enter.show { opacity: 1; pointer-events: auto; }
-    .enter:hover { filter: brightness(1.08); transform: scale(1.02); }
     .foot { position: absolute; bottom: 18px; color: #9fb2d6; font-size: 11px; }
-    .error {
-      color: #ffcccc; font-size: 15px; font-weight: 600; max-width: 520px; line-height: 1.5;
-      display: none; padding: 12px 16px; background: rgba(80,0,0,0.35); border-radius: 10px;
-      border: 1px solid rgba(255,120,120,0.45);
-    }
   </style>
 </head>
 <body>
-  <img class="splash-mark" src="splash-mark.png" alt="" />
   <img class="splash-logo" src="splash-logo.png" alt="SmartGastos" />
   
   <div class="brand">Smart<span class="accent">Gastos</span></div>
@@ -59,8 +47,6 @@
   <div class="track indeterminate" id="track"><div class="fill" id="fill"></div></div>
   <div class="pct" id="pct"></div>
   <div class="status" id="status">Iniciando servicios...</div>
-  <div class="error" id="error"></div>
-  <button class="enter" id="enter">Entrar ahora</button>
   <div class="foot">Cámara de Comercio de Santiago</div>
 
   <script>
@@ -68,68 +54,72 @@
     const pctEl = document.getElementById('pct');
     const fillEl = document.getElementById('fill');
     const trackEl = document.getElementById('track');
-    const enterBtn = document.getElementById('enter');
-    const errorEl = document.getElementById('error');
 
     let navigated = false;
+    const LOADING_MSG = 'Cargando la aplicación...';
 
-    /** Splash servido por FastAPI (mismo origen 127.0.0.1). */
     const onBackendSplash =
       location.hostname === '127.0.0.1' &&
       (location.pathname === '/__splash' || location.pathname.startsWith('/__splash/'));
+
+    function looksTechnical(text) {
+      const t = String(text || '');
+      return /api\/health|GET \/|os error|Connection Failed|Use Entrar|backend\.exe|build-backend/i.test(t);
+    }
 
     async function enterApp() {
       if (navigated) return;
       if (onBackendSplash) {
         try {
           const hr = await fetch('/api/health', { cache: 'no-store' });
-          if (!hr.ok) throw new Error('/api/health status ' + hr.status);
+          if (!hr.ok) {
+            statusEl.textContent = LOADING_MSG;
+            return;
+          }
           navigated = true;
-          statusEl.textContent = 'Abriendo la aplicacion...';
+          statusEl.textContent = 'Abriendo la aplicación...';
           window.location.replace('/');
         } catch (e) {
-          errorEl.textContent =
-            'El servidor no responde (/api/health). Reconstruya backend.exe (build-backend.ps1) y revise %APPDATA%\\SmartGastos\\logs\\ollama.log';
-          errorEl.style.display = 'block';
+          statusEl.textContent = LOADING_MSG;
         }
         return;
       }
       navigated = true;
-      statusEl.textContent = 'Abriendo la aplicacion...';
+      statusEl.textContent = 'Abriendo la aplicación...';
       const t = window.__TAURI__;
-      if (!t || !t.core) return;
-      t.core.invoke('navigate_to_backend').catch((e) => {
-        errorEl.textContent = String(e);
-        errorEl.style.display = 'block';
+      if (!t || !t.core) {
         navigated = false;
+        statusEl.textContent = LOADING_MSG;
+        return;
+      }
+      t.core.invoke('navigate_to_backend').catch(() => {
+        navigated = false;
+        statusEl.textContent = LOADING_MSG;
       });
     }
 
     function render(s) {
       if (!s) return;
-      if (s.message) statusEl.textContent = s.message;
       const err = s.backendError ?? s.backend_error;
-      if (err) {
-        errorEl.textContent = err;
-        errorEl.style.display = 'block';
-      } else if (!navigated) {
-        errorEl.style.display = 'none';
+      const can = !!(s.canContinue ?? s.can_continue);
+      const done = !!(s.ollamaDone ?? s.ollama_done);
+      const waitingForUi = done && !can;
+      const rawMsg = s.message || '';
+      if (waitingForUi || looksTechnical(rawMsg) || looksTechnical(err)) {
+        statusEl.textContent = LOADING_MSG;
+      } else if (rawMsg) {
+        statusEl.textContent = rawMsg;
       }
-      if (typeof s.percent === 'number' && s.percent >= 0) {
+      if (waitingForUi || typeof s.percent !== 'number' || s.percent < 0) {
+        trackEl.classList.add('indeterminate');
+        pctEl.textContent = '';
+      } else {
         trackEl.classList.remove('indeterminate');
         fillEl.style.width = s.percent + '%';
         pctEl.textContent = s.percent + '%';
-      } else {
-        trackEl.classList.add('indeterminate');
-        pctEl.textContent = '';
       }
-      const done = s.ollamaDone ?? s.ollama_done;
-      const can = s.canContinue ?? s.can_continue;
-      if (done) enterBtn.classList.add('show');
       if (done && can && !navigated) enterApp();
     }
-
-    enterBtn.addEventListener('click', enterApp);
 
     function pollHttpStatus() {
       if (navigated) return;

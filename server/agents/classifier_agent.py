@@ -12,6 +12,8 @@ from typing import Dict, List, Optional
 from difflib import SequenceMatcher
 import requests
 
+from ollama_client import resolve_ollama_model
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://127.0.0.1:11434")
 TIMEOUT_CLASSIFICATION = int(os.getenv("OLLAMA_TIMEOUT_CLASSIFICATION", "60"))
 
@@ -292,7 +294,7 @@ Centros de costo:
         response = requests.post(
             f"{OLLAMA_URL}/api/chat",
             json={
-                "model": self.model,
+                "model": resolve_ollama_model(self.model),
                 "messages": [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt}
