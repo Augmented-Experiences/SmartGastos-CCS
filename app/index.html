@@ -191,6 +191,39 @@ a:hover { text-decoration: underline; }
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background .15s;
+  position: relative;
+}
+.sidebar-emp:hover { background: var(--bg3); }
+.emp-switcher {
+  display: none;
+  position: absolute;
+  left: 10px; right: 10px; top: calc(100% - 4px);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(13,29,66,.16);
+  z-index: 40;
+  padding: 6px;
+  max-height: 280px;
+  overflow: auto;
+}
+.emp-switcher.open { display: block; }
+.emp-switcher button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.emp-switcher button:hover { background: var(--bg3); }
+.emp-switcher .emp-sw-active { color: var(--ccs-azul-oscuro); font-weight: 700; }
+.emp-switcher .emp-sw-actions {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 4px;
 }
 .sidebar-emp:hover { background: var(--bg3); }
 .emp-label { font-size: 9px; color: var(--text2); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; font-weight: 600; }
@@ -730,10 +763,45 @@ a:hover { text-decoration: underline; }
 .modal-close:hover { color: var(--red); background: rgba(220,38,38,0.08); }
 .modal-body { padding: 20px 28px 28px 28px; overflow-y: auto; flex: 1; }
 .modal-footer {
-  padding: 14px 28px;
+  padding: 16px 28px;
   border-top: 1px solid var(--border);
   display: flex; gap: 8px; justify-content: flex-end;
-}/* ── Doc Detail ─────────────────────────────────────────────── */
+}
+.modal-head {
+  padding: 22px 28px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.modal-foot {
+  padding: 16px 28px 22px;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.agent-modal .modal { padding: 0; }
+.agent-param-help {
+  font-size: 11px;
+  color: var(--text2);
+  line-height: 1.45;
+  margin-top: 4px;
+}
+.param-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.param-tip {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: rgba(13,61,166,.10);
+  color: var(--ccs-azul-oscuro);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+/* ── Doc Detail ─────────────────────────────────────────────── */
 .doc-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .doc-preview {
   background: var(--bg3);
@@ -979,14 +1047,6 @@ a:hover { text-decoration: underline; }
   margin-bottom: 18px;
   position: relative;
   overflow: hidden;
-}
-.ob-hero::before {
-  content: '';
-  position: absolute;
-  top: -40px; left: 50%; transform: translateX(-50%);
-  width: 200px; height: 200px;
-  background: radial-gradient(circle, rgba(13,61,166,.2) 0%, transparent 70%);
-  pointer-events: none;
 }
 .ob-hero-logo {
   height: 48px;
@@ -1421,6 +1481,71 @@ a:hover { text-decoration: underline; }
   font-size: 11px; color: #991b1b;
   display: flex; align-items: center; gap: 6px;
 }
+
+.export-menu {
+  display: none;
+  position: absolute;
+  right: 0; top: 100%;
+  margin-top: 6px;
+  background: #FFFFFF;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(13,29,66,.18);
+  z-index: 120;
+  min-width: 220px;
+  overflow: hidden;
+}
+.export-menu button {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  border: none;
+  background: #FFFFFF;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.export-menu button:last-child { border-bottom: none; }
+.export-menu button:hover { background: var(--bg3); }
+
+.tour-overlay {
+  position: fixed; inset: 0;
+  background: rgba(13,29,66,.55);
+  z-index: 4000;
+  display: none;
+}
+.tour-overlay.open { display: block; }
+.tour-card {
+  position: absolute;
+  width: min(360px, calc(100vw - 32px));
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 18px 50px rgba(13,29,66,.28);
+  color: var(--text);
+}
+.tour-step { font-size: 11px; font-weight: 700; color: var(--ccs-azul); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 6px; }
+.tour-title { font-size: 16px; font-weight: 800; margin-bottom: 8px; }
+.tour-body { font-size: 13px; color: var(--text2); line-height: 1.55; margin-bottom: 16px; }
+.tour-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.rec-method {
+  background: #F7F9FC;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.rec-method h3 { font-size: 14px; margin-bottom: 6px; }
+.rec-method p, .rec-method li { font-size: 12px; color: var(--text2); line-height: 1.55; }
+.rec-method ul { margin: 8px 0 0 18px; }
+.cat-help {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
 </style>
 </head>
 <body>
@@ -1433,6 +1558,21 @@ a:hover { text-decoration: underline; }
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
+<div class="tour-overlay" id="tourOverlay">
+  <div class="tour-card" id="tourCard"></div>
+</div>
+<div class="modal-overlay" id="exportResultModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-header">
+      <div class="modal-title">Archivo exportado</div>
+      <div class="modal-close" onclick="closeModal('exportResultModal')">✕</div>
+    </div>
+    <div class="modal-body" id="exportResultBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('exportResultModal')">Cerrar</button>
+    </div>
+  </div>
+</div>
 
 <div class="app">
   <!-- Sidebar -->
@@ -1445,10 +1585,11 @@ a:hover { text-decoration: underline; }
         <div class="logo-sub">Gestión de gastos · CCS</div>
       </div>
     </div>
-    <div class="sidebar-emp" onclick="showSection('admin')">
+    <div class="sidebar-emp" id="sidebarEmp" onclick="toggleEmpSwitcher(event)">
       <div class="emp-label">Empresa activa</div>
       <div class="emp-name" id="sidebarEmpName">Sin empresa</div>
       <div class="emp-rut" id="sidebarEmpRut">—</div>
+      <div class="emp-switcher" id="empSwitcher" onclick="event.stopPropagation()"></div>
     </div>
     <div class="sidebar-nav">
       <div class="nav-sec">Principal</div>
@@ -1476,6 +1617,9 @@ a:hover { text-decoration: underline; }
       <div class="nav-item" data-s="admin" onclick="showSection('admin')">
         <span class="nav-icon">⚙️</span>Administración
       </div>
+      <div class="nav-item" data-s="asistente-inicial" onclick="showSetupHome()">
+        <span class="nav-icon">💬</span>Asistente inicial
+      </div>
     </div>
     <div class="sidebar-foot">
       <div class="model-pill" onclick="showSection('agentes')" style="cursor:pointer" title="Ver configuración de agentes">
@@ -1496,13 +1640,14 @@ a:hover { text-decoration: underline; }
         <div class="topbar-sub" id="topbarSub">Resumen de actividad</div>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-ghost btn-sm" onclick="startProductTour(true)" title="Guía de uso">📖 Guía</button>
         <button class="btn btn-secondary btn-sm" onclick="showSection('nuevo-gasto')">➕ Nuevo Gasto</button>
         <div style="position:relative;display:inline-block" id="exportDropdown">
           <button class="btn btn-primary btn-sm" onclick="toggleExportMenu()">⬇ Exportar</button>
-          <div id="exportMenu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;min-width:180px;overflow:hidden">
-            <button onclick="exportData('xlsx')" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:13px;color:var(--text-primary);border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">📊 Excel (.xlsx)</button>
-            <button onclick="exportData('csv')" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:13px;color:var(--text-primary);border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">📄 CSV (separador ;)</button>
-            <button onclick="exportData('pdf')" style="display:block;width:100%;padding:10px 16px;border:none;background:none;text-align:left;cursor:pointer;font-size:13px;color:var(--text-primary)" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">📕 PDF (reporte)</button>
+          <div id="exportMenu" class="export-menu">
+            <button type="button" onclick="exportData('xlsx')">📊 Excel (.xlsx)</button>
+            <button type="button" onclick="exportData('csv')">📄 CSV (separador ;)</button>
+            <button type="button" onclick="exportData('pdf')">📕 PDF (reporte)</button>
           </div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="toggleAssistant()" title="Asistente IA">🤖</button>
@@ -1621,6 +1766,8 @@ a:hover { text-decoration: underline; }
 // ESTADO GLOBAL
 // ═══════════════════════════════════════════════════════════════
 const API = '';
+const LAST_EMPRESA_KEY = 'sg_last_empresa';
+const TOUR_KEY = 'sg_tour_v1';
 let state = {
   empresa: null,
   empresas: [],
@@ -1631,7 +1778,17 @@ let state = {
   charts: {},
   assistantOpen: false,
   ollamaOnline: false,
+  ollamaModels: [],
 };
+
+function persistEmpresa() {
+  if (state.empresa?.id) localStorage.setItem(LAST_EMPRESA_KEY, state.empresa.id);
+}
+
+function displayRut(rut) {
+  if (!rut || String(rut).toUpperCase().startsWith('SIN-RUT')) return 'RUT pendiente';
+  return rut;
+}
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
@@ -1651,20 +1808,24 @@ async function init() {
     if (!state.empresas.length) {
       hideOverlay();
       showOnboarding();
+      bindGlobalFileDrop();
       return;
     }
-    state.empresa = state.empresas[0];
+    state.empresa = state.empresas.find(e => e.id === localStorage.getItem(LAST_EMPRESA_KEY)) || state.empresas[0];
+    persistEmpresa();
     updateSidebarEmpresa();
     showOverlay('Cargando datos...', `Empresa: ${state.empresa.razon_social}`);
     await loadCategorias();
 
     hideOverlay();
     showSection('dashboard');
+    bindGlobalFileDrop();
 
     // Abrir asistente con bienvenida después de 1s
     setTimeout(() => {
       openAssistant();
       addAsstMsg(`¡Hola! Soy tu asistente contable con IA local. 🤖\n\nPuedo ayudarte a procesar documentos, clasificar gastos y analizar tus finanzas. ¿En qué te ayudo hoy?`);
+      if (!localStorage.getItem(TOUR_KEY)) startProductTour(false);
     }, 1200);
 
     // Verificar rendimiento de modelos en background
@@ -1673,6 +1834,7 @@ async function init() {
     console.error('Init error:', e);
     hideOverlay();
     showOnboarding();
+    bindGlobalFileDrop();
   }
 }
 
@@ -1862,9 +2024,39 @@ async function checkOllamaStatus() { return checkReadiness(); }
 function updateSidebarEmpresa() {
   if (state.empresa) {
     document.getElementById('sidebarEmpName').textContent = state.empresa.razon_social;
-    document.getElementById('sidebarEmpRut').textContent = state.empresa.rut || '—';
+    document.getElementById('sidebarEmpRut').textContent = displayRut(state.empresa.rut);
   }
+  renderEmpSwitcher();
 }
+
+function renderEmpSwitcher() {
+  const box = document.getElementById('empSwitcher');
+  if (!box) return;
+  const rows = (state.empresas || []).map(e => `
+    <button type="button" class="${state.empresa?.id === e.id ? 'emp-sw-active' : ''}"
+      onclick="selectEmpresa('${e.id}')">${escHtml(e.razon_social)}</button>
+  `).join('');
+  box.innerHTML = `
+    ${rows || '<div style="padding:8px 10px;color:var(--text3);font-size:12px">Sin empresas</div>'}
+    <div class="emp-sw-actions">
+      <button type="button" onclick="showOnboarding(true)">+ Nueva empresa</button>
+      <button type="button" onclick="showSection('admin')">Administrar empresas</button>
+    </div>
+  `;
+}
+
+function toggleEmpSwitcher(ev) {
+  if (ev) ev.stopPropagation();
+  const box = document.getElementById('empSwitcher');
+  if (!box) return;
+  box.classList.toggle('open');
+  renderEmpSwitcher();
+}
+
+document.addEventListener('click', () => {
+  const box = document.getElementById('empSwitcher');
+  if (box) box.classList.remove('open');
+});
 
 // ═══════════════════════════════════════════════════════════════
 // NAVEGACIÓN
@@ -1882,6 +2074,7 @@ function showSection(s) {
     recomendaciones: ['Recomendaciones', 'Optimización de gastos con IA'],
     agentes:         ['Agentes IA', 'Configuración de prompts y parámetros de cada agente'],
     admin:           ['Administración', 'Empresas y categorías contables'],
+    'asistente-inicial': ['Asistente inicial', 'Configuración y preguntas de arranque'],
   };
   const [t, sub] = titles[s] || ['', ''];
   document.getElementById('topbarTitle').textContent = t;
@@ -2081,9 +2274,16 @@ const OB_STEPS = [
 let obData = {};
 let obStep = 0;
 
-function showOnboarding() {
+function showOnboarding(asExtraCompany = false) {
   obData = {};
   obStep = 0;
+  window._obExtra = !!asExtraCompany;
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.s === 'asistente-inicial')
+  );
+  state.currentSection = 'asistente-inicial';
+  document.getElementById('topbarTitle').textContent = asExtraCompany ? 'Nueva empresa' : 'Bienvenida';
+  document.getElementById('topbarSub').textContent = 'Asistente de configuración';
   document.getElementById('mainContent').innerHTML = `
     <div class="ob-wrap">
       <div class="ob-hero">
@@ -2240,27 +2440,12 @@ async function obFinish() {
     const d = await r.json();
     await loadEmpresas();
     state.empresa = state.empresas.find(e => e.id === d.id) || state.empresas[0];
+    persistEmpresa();
     updateSidebarEmpresa();
-
-    // Crear categorías estándar
-    const cats = obData.cats_choice && obData.cats_choice.toLowerCase().includes('personal')
-      ? []
-      : ['Operaciones', 'Marketing', 'Sueldos y Honorarios', 'Tecnología', 'Impuestos y Tasas',
-         'Transporte y Logística', 'Alimentación', 'Servicios Básicos', 'Arriendo', 'Otros Gastos'];
-
-    for (const cat of cats) {
-      try {
-        await fetch(`${API}/api/empresas/${state.empresa.id}/categorias`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nombre: cat })
-        });
-      } catch(e) {}
-    }
     await loadCategorias();
 
     typing.remove();
-    obAddMsg(`¡Todo listo, ${obData.razon_social}! 🎉\n\nHe creado ${cats.length} categorías contables y configurado tu cuenta.\n\nAhora puedes subir tu primer documento y el pipeline IA lo procesará automáticamente.`, 'bot');
+    obAddMsg(`¡Todo listo, ${obData.razon_social}! 🎉\n\nHe configurado ${state.categorias.length} categorías contables en tu cuenta.\n\nPuedes hacer otra pregunta aquí o entrar al panel para subir tu primer documento.`, 'bot');
 
     // Botón de inicio
     const btnDiv = document.createElement('div');
@@ -2280,7 +2465,91 @@ function obGoApp() {
   setTimeout(() => {
     openAssistant();
     addAsstMsg(`¡Bienvenido a SmartGastos! 🎉\n\nTu empresa "${state.empresa?.razon_social}" está lista.\n\nSube tu primer documento para comenzar. El pipeline IA lo procesará en segundos.`);
+    if (!localStorage.getItem(TOUR_KEY)) startProductTour(false);
   }, 500);
+}
+
+function showSetupHome() {
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.s === 'asistente-inicial')
+  );
+  state.currentSection = 'asistente-inicial';
+  document.getElementById('topbarTitle').textContent = 'Asistente inicial';
+  document.getElementById('topbarSub').textContent = 'Configuración y preguntas de arranque';
+  document.getElementById('mainContent').innerHTML = `
+    <div class="ob-wrap">
+      <div class="ob-hero">
+        <img class="ob-hero-logo" src="logo-ccs.png" alt="Cámara de Comercio de Santiago" />
+        <div class="ob-hero-title">Asistente inicial</div>
+        <div class="ob-hero-sub">
+          Aquí configuras empresas, recorres la guía de uso y puedes hacer preguntas antes de volver al panel.
+        </div>
+      </div>
+      <div class="ob-chat">
+        <div class="ob-chat-msgs" id="obMsgs"></div>
+        <div class="ob-input-area">
+          <div class="ob-suggestions" id="obSugs"></div>
+          <div class="ob-input-row">
+            <input class="ob-input" id="obInput" placeholder="Escribe una pregunta..."
+              onkeydown="if(event.key==='Enter')setupChatSend()"/>
+            <button class="btn btn-primary" onclick="setupChatSend()">Enviar →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  obAddMsg(state.empresa
+    ? `Hola de nuevo. La empresa activa es ${state.empresa.razon_social}. ¿Qué quieres hacer?`
+    : 'Hola. Aún no hay una empresa configurada. ¿Empezamos?', 'bot');
+  const sugs = document.getElementById('obSugs');
+  const options = state.empresa
+    ? ['Registrar otra empresa', 'Cambiar de empresa', 'Guía de uso', 'Volver al panel']
+    : ['Registrar empresa', 'Guía de uso'];
+  sugs.innerHTML = options.map(s =>
+    `<div class="ob-sug" onclick="setupChatPick('${s.replace(/'/g, "\\'")}')">${escHtml(s)}</div>`
+  ).join('');
+}
+
+function setupChatPick(val) {
+  document.getElementById('obInput').value = val;
+  setupChatSend();
+}
+
+async function setupChatSend() {
+  const input = document.getElementById('obInput');
+  const val = (input.value || '').trim();
+  if (!val) return;
+  obAddMsg(val, 'user');
+  input.value = '';
+  const lower = val.toLowerCase();
+  if (lower.includes('registrar') || lower.includes('nueva empresa') || lower.includes('otra empresa')) {
+    setTimeout(() => showOnboarding(!!state.empresa), 250);
+    return;
+  }
+  if (lower.includes('cambiar')) {
+    obAddMsg('Elige la empresa activa desde el recuadro de la izquierda o en Administración.', 'bot');
+    toggleEmpSwitcher();
+    return;
+  }
+  if (lower.includes('guía') || lower.includes('guia')) {
+    startProductTour(true);
+    return;
+  }
+  if (lower.includes('panel') || lower.includes('volver')) {
+    showSection('dashboard');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: val, empresa_id: state.empresa?.id || null, period_days: 90 })
+    });
+    const d = await r.json();
+    obAddMsg(d.response || d.text || 'Listo. Si quieres, también puedo abrir la guía de uso.', 'bot');
+  } catch (e) {
+    obAddMsg('No pude responder ahora. Prueba la guía de uso o el asistente del panel.', 'bot');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2546,8 +2815,9 @@ const STEPS = [
   { id: 'save',           icon: '💾', name: 'Guardando documento' },
 ];
 
-function renderNuevoGasto() {
+async function renderNuevoGasto() {
   if (!state.empresa) { showOnboarding(); return; }
+  await loadCategorias();
   document.getElementById('mainContent').innerHTML = `
     <div class="ng-layout">
       <div class="ng-main">
@@ -2639,9 +2909,12 @@ function renderNuevoGasto() {
           <div class="expense-form" id="expenseForm"></div>
           <div class="result-cat" id="resultCat"></div>
           <div class="result-actions">
-            <div class="cat-row">
-              <label>Categoría:</label>
-              <select id="catSelect" class="form-select"></select>
+            <div class="cat-row" style="flex-direction:column;align-items:stretch;gap:6px">
+              <div class="cat-help">El clasificador sugiere una categoría según el proveedor y el texto del documento. Puedes cambiarla aquí antes de guardar. Las categorías se administran en Config → Administración.</div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <label>Categoría:</label>
+                <select id="catSelect" class="form-select"></select>
+              </div>
             </div>
             <button class="btn btn-success btn-lg" onclick="validateAndAcceptDocument()">✓ Validar y Guardar</button>
             <button class="btn btn-secondary" onclick="resetUpload()">↩ Procesar otro</button>
@@ -3286,7 +3559,7 @@ function useServerPreview(docId) {
   probe.src = `${API}/api/documentos/${docId}/preview?full=1&t=${Date.now()}`;
 }
 
-function renderResultPanel(data) {
+async function renderResultPanel(data) {
   const fields = data.fields || {};
   const cls = data.classification || {};
 
@@ -3414,6 +3687,9 @@ function renderResultPanel(data) {
 
   // ── Selector de categoría ──
   const sel = document.getElementById('catSelect');
+  if (!state.categorias.length) {
+    await loadCategorias();
+  }
   sel.innerHTML = `<option value="">Sin categoría</option>` +
     state.categorias.map(c =>
       `<option value="${c.id}" ${c.nombre === cls.categoria_sugerida ? 'selected' : ''}>${escHtml(c.nombre)}</option>`
@@ -3640,7 +3916,13 @@ async function validateAndAcceptDocument() {
   }
 }
 
+let _lastFileSig = '';
 async function processFile(file) {
+  if (!file) return;
+  const sig = `${file.name}:${file.size}:${file.lastModified}`;
+  if (sig === _lastFileSig) return;
+  _lastFileSig = sig;
+  setTimeout(() => { if (_lastFileSig === sig) _lastFileSig = ''; }, 1500);
   if (!state.empresa) { showToast('Selecciona una empresa primero', 'error'); return; }
   showUploadPreview(file);
   initPipelineUI(file.name);
@@ -3753,20 +4035,43 @@ function resetUpload() {
 
 function onDragOver(e) {
   e.preventDefault();
-  document.getElementById('uploadZone').classList.add('dragover');
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  const zone = document.getElementById('uploadZone');
+  if (zone) zone.classList.add('dragover');
 }
 function onDragLeave(e) {
-  document.getElementById('uploadZone').classList.remove('dragover');
+  e.preventDefault();
+  const zone = document.getElementById('uploadZone');
+  if (zone) zone.classList.remove('dragover');
 }
 function onDrop(e) {
   e.preventDefault();
-  document.getElementById('uploadZone').classList.remove('dragover');
-  const f = e.dataTransfer.files[0];
+  e.stopPropagation();
+  const zone = document.getElementById('uploadZone');
+  if (zone) zone.classList.remove('dragover');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
   if (f) processFile(f);
 }
 function onFileSelect(e) {
   const f = e.target.files[0];
   if (f) processFile(f);
+}
+
+function bindGlobalFileDrop() {
+  if (window._sgDropBound) return;
+  window._sgDropBound = true;
+  window.addEventListener('dragover', (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener('drop', (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (!files || !files.length) return;
+    e.preventDefault();
+    if (state.currentSection === 'nuevo-gasto' || document.getElementById('uploadZone')) {
+      processFile(files[0]);
+    }
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -4597,8 +4902,21 @@ async function renderRecomendaciones() {
     const r = await fetch(`${API}/api/empresas/${state.empresa.id}/recomendaciones`);
     const d = await r.json();
     const recs = d.recomendaciones || [];
+    const metodo = d.metodologia || {};
+    const methodHtml = `
+      <div class="rec-method">
+        <h3>Cómo se calcula el ahorro</h3>
+        <p>${escHtml(metodo.resumen || 'Las recomendaciones se calculan solas a partir de tus documentos. No hace falta configurar parámetros: revisa las tarjetas y decide qué aplicar.')}</p>
+        <ul>
+          ${(metodo.reglas || []).map(r => `<li><strong>${escHtml(r.cuando)}</strong> — ${escHtml(r.ahorro)}</li>`).join('') || `
+            <li>Una categoría que supera el 20% del gasto: 15% estimado de esa categoría.</li>
+            <li>Más de 2 proveedores en la misma categoría: 5% estimado al consolidar.</li>
+            <li>Posibles duplicados (mismo proveedor, monto y fechas cercanas): el monto duplicado.</li>
+          `}
+        </ul>
+      </div>`;
     if (!recs.length) {
-      document.getElementById('mainContent').innerHTML = `
+      document.getElementById('mainContent').innerHTML = methodHtml + `
         <div class="empty-state">
           <div class="es-icon">💡</div>
           <div class="es-title">Sin recomendaciones aún</div>
@@ -4606,7 +4924,7 @@ async function renderRecomendaciones() {
         </div>`;
       return;
     }
-    document.getElementById('mainContent').innerHTML = recs.map(rec => {
+    document.getElementById('mainContent').innerHTML = methodHtml + recs.map(rec => {
       // Backend puede devolver: rec.titulo o rec.mensaje, rec.descripcion o rec.accion, rec.prioridad o rec.severidad
       const titulo = rec.titulo || rec.mensaje || rec.tipo || 'Recomendación';
       const desc = rec.descripcion || rec.accion || '';
@@ -4621,6 +4939,7 @@ async function renderRecomendaciones() {
             <div style="flex:1">
               <div style="font-size:14px;font-weight:700;margin-bottom:5px">${escHtml(titulo)}</div>
               <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:8px">${escHtml(desc)}</div>
+              ${rec.criterio ? `<div style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:8px">${escHtml(rec.criterio)}</div>` : ''}
               ${ahorro > 0
                 ? `<div style="font-size:12px;color:var(--green);font-weight:700">
                     💰 Ahorro potencial: $${Number(ahorro).toLocaleString('es-CL')}
@@ -4676,19 +4995,19 @@ function renderAgentesGrid() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px" id="agentesGrid"></div>
     <div class="modal-overlay" id="agentModal" style="z-index:9999">
-      <div class="modal" style="max-width:680px;width:95vw;max-height:90vh;overflow-y:auto">
+      <div class="modal agent-modal" style="max-width:720px;width:95vw;max-height:90vh;overflow-y:auto">
         <div class="modal-head">
           <div class="modal-title" id="agentModalTitle">Configurar Agente</div>
           <button class="btn btn-ghost btn-sm" onclick="closeModal('agentModal')">&#x2715;</button>
         </div>
-        <div id="agentModalBody" style="padding:20px"></div>
+        <div id="agentModalBody" style="padding:8px 28px 12px"></div>
         <div class="modal-foot" id="agentModalFoot"></div>
       </div>
     </div>
   `;
   const grid = document.getElementById('agentesGrid');
   grid.innerHTML = _agentesData.map(a => `
-    <div class="card" style="cursor:pointer;transition:border-color .2s" onclick="openAgentModal('${a.id}')">
+    <div class="card" style="cursor:pointer;transition:border-color .2s;padding:20px" onclick="openAgentModal('${a.id}')">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
         <span style="font-size:28px">${a.icono || '🤖'}</span>
         <div style="flex:1">
@@ -4714,6 +5033,43 @@ function renderAgentesGrid() {
   });
 }
 
+const AGENT_PARAM_HELP = {
+  timeout: {
+    label: 'Tiempo máximo (segundos)',
+    help: 'Cuánto espera SmartGastos la respuesta del modelo. Si el documento es largo o el PC es lento, súbelo. Valor típico: 120–180.',
+  },
+  temperature: {
+    label: 'Creatividad',
+    help: 'Cerca de 0: respuestas más fijas y predecibles (recomendado para extraer datos de boletas). Cerca de 1: más variación. Usa 0.1–0.3.',
+  },
+  max_tokens: {
+    label: 'Largo máximo de respuesta',
+    help: 'Tope de palabras que puede devolver el modelo. 800–2048 alcanza para el JSON de una boleta.',
+  },
+  historial_meses: {
+    label: 'Meses de historial',
+    help: 'Cuántos meses de gastos mira el recomendador para sugerir ahorros. No cambia el cálculo automático, solo el alcance.',
+  },
+  compactar_despues_de: {
+    label: 'Resumir historial',
+    help: 'Al cambiar de mes, comprime el historial viejo para no saturar la memoria del modelo.',
+  },
+};
+
+function agentModelOptionsHtml(current, isOcr) {
+  const installed = [...new Set([current, ...(state.ollamaModels || [])].filter(Boolean))];
+  if (isOcr) {
+    return `<option value="${escHtml(current || 'tesseract')}" selected>${escHtml(current || 'tesseract')}</option>`;
+  }
+  const opts = installed.map(m =>
+    `<option value="${escHtml(m)}" ${m === current ? 'selected' : ''}>${escHtml(m)}</option>`
+  );
+  if (current && !installed.includes(current)) {
+    opts.unshift(`<option value="${escHtml(current)}" selected>${escHtml(current)}</option>`);
+  }
+  return opts.join('') || `<option value="${escHtml(current || '')}" selected>${escHtml(current || 'Sin modelos detectados')}</option>`;
+}
+
 function openAgentModal(agentId) {
   const agent = _agentesData.find(a => a.id === agentId);
   if (!agent) return;
@@ -4724,45 +5080,55 @@ function openAgentModal(agentId) {
   const isOcr = agent.tipo === 'ocr';
   const hasLLM = !isOcr;
   body.innerHTML = `
-    <div style="padding:10px 12px;background:var(--bg3);border-radius:8px;margin-bottom:16px;font-size:12px;color:var(--text2);line-height:1.5">
+    <div style="padding:12px 14px;background:var(--bg3);border-radius:8px;margin-bottom:18px;font-size:12px;color:var(--text2);line-height:1.5">
       ${escHtml(agent.descripcion || '')}
     </div>
-    <div style="margin-bottom:16px">
+    <div style="margin-bottom:18px">
       <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Modelo</label>
-      <input class="form-input" id="agentModel" value="${escHtml(agent.modelo || '')}" placeholder="ej: motor-ia:0.8b, tesseract" style="margin-top:4px" ${isOcr ? 'disabled' : ''}/>
-      ${isOcr ? '<div style="font-size:10px;color:var(--text3);margin-top:4px">El Agente OCR usa Tesseract — no requiere motor LLM.</div>' : '<div style="font-size:10px;color:var(--text3);margin-top:4px">El motor de IA debe estar disponible en Ollama. Consulta la documentación del plugin para modelos compatibles.</div>'}
+      <select class="form-select" id="agentModel" style="margin-top:6px" ${isOcr ? 'disabled' : ''}>
+        ${agentModelOptionsHtml(agent.modelo || '', isOcr)}
+      </select>
+      ${isOcr
+        ? '<div class="agent-param-help">Este agente lee el documento con OCR local. No usa un modelo de lenguaje.</div>'
+        : '<div class="agent-param-help">Elige un modelo ya descargado en Ollama. La lista sale de los modelos disponibles en este equipo.</div>'}
     </div>
-    <div style="margin-bottom:16px">
+    <div style="margin-bottom:18px">
       <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Contexto de memoria</label>
-      <select class="form-select" id="agentContexto" style="margin-top:4px">
-        <option value="por_documento" ${agent.contexto === 'por_documento' ? 'selected' : ''}>📄 Por documento — contexto limpio en cada lectura (OCR, Visual, Extractor, Clasificador, Auditor)</option>
-        <option value="historial_mensual" ${agent.contexto === 'historial_mensual' ? 'selected' : ''}>📅 Historial mensual — acumula memoria del mes, se compacta al cambiar de mes (Recomendador)</option>
+      <select class="form-select" id="agentContexto" style="margin-top:6px">
+        <option value="por_documento" ${agent.contexto === 'por_documento' ? 'selected' : ''}>Por documento — contexto limpio en cada lectura</option>
+        <option value="historial_mensual" ${agent.contexto === 'historial_mensual' ? 'selected' : ''}>Historial mensual — acumula memoria del mes</option>
       </select>
     </div>
     ${hasLLM ? `
-    <div style="margin-bottom:16px">
-      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">🤖 Prompt del sistema (system prompt)</label>
-      <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Define el rol y comportamiento del agente. Se envía como system message al modelo.</div>
-      <textarea class="form-input" id="agentSystemPrompt" rows="5" style="margin-top:4px;font-family:monospace;font-size:11px;resize:vertical">${escHtml(agent.system_prompt || '')}</textarea>
+    <div style="margin-bottom:18px">
+      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Prompt del sistema</label>
+      <div class="agent-param-help">Define el rol del agente. Se envía como instrucción fija al modelo.</div>
+      <textarea class="form-input" id="agentSystemPrompt" rows="5" style="margin-top:6px;font-family:monospace;font-size:11px;resize:vertical">${escHtml(agent.system_prompt || '')}</textarea>
     </div>
-    <div style="margin-bottom:16px">
-      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">💬 Prompt de usuario (opcional)</label>
-      <div style="font-size:10px;color:var(--text3);margin-bottom:6px">Sobreescribe el prompt generado automáticamente. Deja vacío para usar el prompt dinámico del pipeline.<br>Variables: {text} (OCR), {proveedor}, {descripcion}, {tipo_documento}, {monto_total}, {moneda}, {categorias}, {resumen}, {giro}</div>
-      <textarea class="form-input" id="agentPrompt" rows="6" style="margin-top:4px;font-family:monospace;font-size:11px;resize:vertical">${escHtml(agent.prompt || '')}</textarea>
+    <div style="margin-bottom:18px">
+      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Prompt de usuario (opcional)</label>
+      <div class="agent-param-help">Déjalo vacío para usar el prompt automático del pipeline.</div>
+      <textarea class="form-input" id="agentPrompt" rows="6" style="margin-top:6px;font-family:monospace;font-size:11px;resize:vertical">${escHtml(agent.prompt || '')}</textarea>
     </div>` : `
     <div style="padding:12px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--text3);margin-bottom:16px">
-      🔍 El Agente OCR usa Tesseract con múltiples modos PSM y preprocesamiento adaptativo. No usa LLM.<br>
-      Configura los parámetros de Tesseract abajo.
+      El OCR usa RapidOCR/Tesseract con preprocesamiento. No usa un modelo de lenguaje.
     </div>`}
-    <div style="margin-bottom:16px">
-      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">⚙️ Parámetros de ejecución</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px" id="agentParamsGrid">
-        ${Object.entries(params).map(([k, v]) => `
+    <div style="margin-bottom:8px">
+      <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Parámetros de ejecución</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-top:10px" id="agentParamsGrid">
+        ${Object.entries(params).map(([k, v]) => {
+          const meta = AGENT_PARAM_HELP[k] || { label: k, help: 'Parámetro avanzado del agente. Si no estás seguro, deja el valor actual.' };
+          return `
           <div>
-            <label style="font-size:10px;color:var(--text3)">${escHtml(k)}</label>
+            <div class="param-label-row">
+              <label style="font-size:11px;color:var(--text);font-weight:600">${escHtml(meta.label)}</label>
+              <span class="param-tip" title="${escHtml(meta.help)}">?</span>
+            </div>
             <input class="form-input" data-param="${escHtml(k)}"
-              value="${escHtml(String(v))}" style="margin-top:2px;font-size:12px"/>
-          </div>`).join('')}
+              value="${escHtml(String(v))}" style="margin-top:4px;font-size:12px"/>
+            <div class="agent-param-help">${escHtml(meta.help)}</div>
+          </div>`;
+        }).join('')}
       </div>
     </div>
   `;
@@ -4825,6 +5191,8 @@ async function resetAgentes() {
 // ADMINISTRACIÓN
 // ═══════════════════════════════════════════════════════════════
 async function renderAdmin() {
+  await loadEmpresas();
+  await loadCategorias();
   document.getElementById('mainContent').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
       <div class="card">
@@ -4856,15 +5224,15 @@ async function renderAdmin() {
     <div style="display:flex;align-items:center;gap:8px;padding:9px 10px;
       background:var(--bg3);
       border:1px solid ${state.empresa?.id === e.id ? 'var(--ccs-azul)' : 'var(--border)'};
-      border-radius:var(--radius-sm);margin-bottom:6px;cursor:pointer"
-      onclick="selectEmpresa('${e.id}')">
-      <div style="flex:1">
+      border-radius:var(--radius-sm);margin-bottom:6px">
+      <div style="flex:1;cursor:pointer" onclick="selectEmpresa('${e.id}')">
         <div style="font-size:12px;font-weight:700">${escHtml(e.razon_social)}</div>
-        <div style="font-size:10px;color:var(--text3)">${e.rut || '—'} · ${e.pais || '—'}</div>
+        <div style="font-size:10px;color:var(--text3)">${displayRut(e.rut)} · ${e.pais || '—'}</div>
       </div>
       ${state.empresa?.id === e.id
         ? '<span style="color:var(--green);font-size:10px;font-weight:700">✓ Activa</span>'
-        : ''}
+        : `<button class="btn btn-ghost btn-sm" onclick="selectEmpresa('${e.id}')">Usar</button>`}
+      <button class="btn btn-ghost btn-sm" title="Eliminar empresa" onclick="deleteEmpresa('${e.id}', '${escHtml(e.razon_social).replace(/'/g, '')}')">Eliminar</button>
     </div>`).join('') || '<div style="color:var(--text3);font-size:12px">Sin empresas</div>';
 
   document.getElementById('adminCats').innerHTML = state.categorias.map(c => `
@@ -4878,10 +5246,37 @@ async function renderAdmin() {
 
 async function selectEmpresa(id) {
   state.empresa = state.empresas.find(e => e.id === id);
+  persistEmpresa();
   updateSidebarEmpresa();
   await loadCategorias();
-  renderAdmin();
+  const sw = document.getElementById('empSwitcher');
+  if (sw) sw.classList.remove('open');
+  if (state.currentSection === 'admin') renderAdmin();
   showToast(`Empresa activa: ${state.empresa.razon_social}`, 'info');
+}
+
+async function deleteEmpresa(id, nombre) {
+  if (!confirm(`¿Eliminar la empresa "${nombre}" y sus documentos? Esta acción no se puede deshacer.`)) return;
+  try {
+    const r = await fetch(`${API}/api/empresas/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    await loadEmpresas();
+    if (state.empresa?.id === id) {
+      state.empresa = state.empresas[0] || null;
+      persistEmpresa();
+      updateSidebarEmpresa();
+    }
+    if (!state.empresa) {
+      showOnboarding();
+      showToast('Empresa eliminada. Configura una nueva para continuar.', 'info');
+      return;
+    }
+    await loadCategorias();
+    showToast('Empresa eliminada', 'success');
+    renderAdmin();
+  } catch (e) {
+    showToast('No se pudo eliminar: ' + e.message, 'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5015,6 +5410,7 @@ async function createEmpresa() {
     const d = await r.json();
     await loadEmpresas();
     state.empresa = state.empresas.find(e => e.id === d.id) || state.empresas[0];
+    persistEmpresa();
     updateSidebarEmpresa();
     await loadCategorias();
     closeModal('empresaModal');
@@ -5047,9 +5443,9 @@ async function addCategory() {
 // ═══════════════════════════════════════════════════════════════
 function toggleExportMenu() {
   const menu = document.getElementById('exportMenu');
-  menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  const open = window.getComputedStyle(menu).display !== 'none' && menu.style.display !== 'none';
+  menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
 }
-// Cerrar menú al hacer click fuera
 document.addEventListener('click', (e) => {
   const dd = document.getElementById('exportDropdown');
   const menu = document.getElementById('exportMenu');
@@ -5066,10 +5462,30 @@ async function exportData(formato = 'xlsx') {
     const r = await fetch(`${API}/api/empresas/${state.empresa.id}/export/${formato}`, { method: 'POST' });
     const d = await r.json();
     if (d.error) { showToast('Error: ' + d.error, 'error'); return; }
-    if (d.filename) {
-      window.open(`${API}/api/exports/${d.filename}`, '_blank');
-      showToast(`${labels[formato] || formato} generado correctamente`, 'success');
+    const filename = d.filename || '';
+    const ruta = d.archivo || d.ruta || '';
+    if (filename) {
+      const a = document.createElement('a');
+      a.href = `${API}/api/exports/${encodeURIComponent(filename)}`;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
+    const body = document.getElementById('exportResultBody');
+    body.innerHTML = `
+      <p style="font-size:14px;margin-bottom:10px">El archivo <strong>${escHtml(filename || labels[formato])}</strong> quedó listo.</p>
+      <p style="font-size:12px;color:var(--text2);margin-bottom:8px">Ubicación en este equipo:</p>
+      <div style="font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;word-break:break-all">
+        ${escHtml(ruta || (filename ? ('carpeta de datos de SmartGastos / exports / ' + filename) : 'No disponible'))}
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:10px;line-height:1.5">
+        En Windows la carpeta de la app suele ser <code>%APPDATA%\\SmartGastos\\exports</code>.
+        El archivo también se descarga para que lo abras de inmediato.
+      </p>
+    `;
+    openModal('exportResultModal');
+    showToast(`${labels[formato] || formato} guardado`, 'success');
   } catch(e) {
     showToast('Error exportando: ' + e.message, 'error');
   }
@@ -5141,6 +5557,87 @@ function safeHtml(html) {
     });
   }
   return escHtml(html);
+}
+
+const TOUR_STEPS = [
+  {
+    title: 'Empresa activa',
+    body: 'Aquí ves la empresa con la que estás trabajando. Haz clic para cambiar, crear o administrar otras empresas en la misma aplicación.',
+  },
+  {
+    title: 'Nuevo gasto',
+    body: 'Arrastra un PDF o una foto de la boleta, o usa Seleccionar archivo. El pipeline lee el texto, propone los campos y sugiere una categoría. Tú la confirmas o la cambias antes de guardar.',
+    section: 'nuevo-gasto',
+  },
+  {
+    title: 'Documentos',
+    body: 'El historial de gastos queda aquí. Puedes buscar, filtrar y abrir cada documento para corregir datos.',
+    section: 'documentos',
+  },
+  {
+    title: 'Recomendaciones',
+    body: 'El ahorro potencial se calcula solo, con reglas fijas (por ejemplo, 15% si una categoría supera el 20% del gasto). No hace falta configurar parámetros: revisa y decide qué aplicar.',
+    section: 'recomendaciones',
+  },
+  {
+    title: 'Agentes IA',
+    body: 'Cada tarjeta abre la configuración del agente. El modelo se elige en un listado y cada parámetro (tiempo máximo, creatividad, largo de respuesta) trae una explicación.',
+    section: 'agentes',
+  },
+  {
+    title: 'Administración y asistente inicial',
+    body: 'En Administración creas o eliminas empresas y categorías. El Asistente inicial te devuelve al chat de configuración para registrar otra empresa o hacer preguntas.',
+    section: 'admin',
+  },
+];
+
+let _tourIdx = 0;
+let _tourManual = false;
+
+function startProductTour(manual = false) {
+  _tourIdx = 0;
+  _tourManual = !!manual;
+  const ov = document.getElementById('tourOverlay');
+  if (!ov) return;
+  ov.classList.add('open');
+  renderTourStep();
+}
+
+function renderTourStep() {
+  const step = TOUR_STEPS[_tourIdx];
+  const card = document.getElementById('tourCard');
+  if (!step || !card) { endProductTour(); return; }
+  if (step.section) showSection(step.section);
+  card.innerHTML = `
+    <div class="tour-step">Paso ${_tourIdx + 1} de ${TOUR_STEPS.length}</div>
+    <div class="tour-title">${escHtml(step.title)}</div>
+    <div class="tour-body">${escHtml(step.body)}</div>
+    <div class="tour-actions">
+      <button class="btn btn-ghost btn-sm" onclick="endProductTour()">Saltar</button>
+      ${_tourIdx > 0 ? '<button class="btn btn-secondary btn-sm" onclick="tourPrev()">Atrás</button>' : ''}
+      <button class="btn btn-primary btn-sm" onclick="tourNext()">${_tourIdx === TOUR_STEPS.length - 1 ? 'Listo' : 'Siguiente'}</button>
+    </div>
+  `;
+  const sidebar = document.getElementById('sidebar');
+  const left = sidebar ? sidebar.getBoundingClientRect().width + 24 : 280;
+  card.style.left = Math.min(left, window.innerWidth - 380) + 'px';
+  card.style.top = '88px';
+}
+
+function tourNext() {
+  if (_tourIdx >= TOUR_STEPS.length - 1) { endProductTour(); return; }
+  _tourIdx += 1;
+  renderTourStep();
+}
+function tourPrev() {
+  if (_tourIdx > 0) _tourIdx -= 1;
+  renderTourStep();
+}
+function endProductTour() {
+  const ov = document.getElementById('tourOverlay');
+  if (ov) ov.classList.remove('open');
+  localStorage.setItem(TOUR_KEY, '1');
+  if (!_tourManual) showSection('dashboard');
 }
 
 // Cerrar modales al hacer clic fuera

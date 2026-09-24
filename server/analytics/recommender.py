@@ -72,7 +72,37 @@ class RecommendationEngine:
             "fecha_generacion": datetime.utcnow().isoformat(),
             "total_recomendaciones": len(recommendations),
             "ahorro_potencial_total": sum(r.get("ahorro_potencial", 0) for r in recommendations),
-            "recomendaciones": recommendations
+            "recomendaciones": recommendations,
+            "metodologia": {
+                "resumen": "Las recomendaciones se calculan solas a partir de tus documentos de los últimos meses. No hace falta configurar parámetros: revisa las tarjetas y decide qué aplicar.",
+                "reglas": [
+                    {
+                        "id": "categoria_alto_gasto",
+                        "cuando": "Una categoría supera el 20% del gasto del período",
+                        "ahorro": "15% estimado de esa categoría",
+                    },
+                    {
+                        "id": "consolidacion_proveedores",
+                        "cuando": "Hay más de 2 proveedores en la misma categoría",
+                        "ahorro": "5% estimado al consolidar compras",
+                    },
+                    {
+                        "id": "duplicados",
+                        "cuando": "Mismo proveedor, mismo monto y fechas a menos de 7 días",
+                        "ahorro": "El monto del documento duplicado",
+                    },
+                    {
+                        "id": "suscripcion_recurrente",
+                        "cuando": "Un proveedor cobra con intervalos regulares (3 o más veces)",
+                        "ahorro": "10% estimado de la proyección anual",
+                    },
+                    {
+                        "id": "alza_anomala",
+                        "cuando": "Un cobro supera 2,5 veces el promedio de ese proveedor",
+                        "ahorro": "La diferencia respecto al promedio",
+                    },
+                ],
+            },
         }
     
     def _recommend_provider_consolidation(self, docs: list) -> list:
@@ -107,7 +137,8 @@ class RecommendationEngine:
                     "ahorro_potencial": round(total_category * 0.05, 2),  # 5% de ahorro estimado
                     "impacto_potencial": round(total_category * 0.05, 2),
                     "mensaje": f"Consolidar {len(providers_unique)} proveedores de {category} podría ahorrar ~{round(total_category * 0.05, 2)}",
-                    "accion": f"Negociar con 1-2 proveedores principales para {category}"
+                    "accion": f"Negociar con 1-2 proveedores principales para {category}",
+                    "criterio": "Hay más de 2 proveedores en la misma categoría. El ahorro es un 5% estimado al consolidar compras.",
                 })
         
         return recommendations
@@ -145,7 +176,8 @@ class RecommendationEngine:
                 "ahorro_potencial": round(total_duplicate_amount, 2),
                 "impacto_potencial": round(total_duplicate_amount, 2),
                 "mensaje": f"Se detectaron {len(potential_duplicates)} pares de documentos potencialmente duplicados",
-                "accion": "Revisar y eliminar documentos duplicados"
+                "accion": "Revisar y eliminar documentos duplicados",
+                "criterio": "Mismo proveedor, mismo monto y fechas a menos de 7 días. El ahorro es el monto duplicado.",
             })
         
         return recommendations
@@ -196,7 +228,8 @@ class RecommendationEngine:
                         "ahorro_potencial": round(annual_projection * 0.10, 2),  # 10% de ahorro estimado
                         "impacto_potencial": round(annual_projection * 0.10, 2),
                         "mensaje": f"{provider} es un cobro recurrente cada ~{round(avg_interval)} días",
-                        "accion": f"Revisar contrato y negociar descuentos anuales o cambiar proveedor"
+                        "accion": f"Revisar contrato y negociar descuentos anuales o cambiar proveedor",
+                        "criterio": "El proveedor cobra con intervalos regulares. El ahorro es un 10% estimado de la proyección anual.",
                     })
         
         return recommendations
@@ -229,7 +262,8 @@ class RecommendationEngine:
                     "ahorro_potencial": round(amount * 0.15, 2),  # 15% de ahorro estimado
                     "impacto_potencial": round(amount * 0.15, 2),
                     "mensaje": f"{category} representa {percentage:.1f}% del gasto total",
-                    "accion": f"Revisar gastos en {category} e identificar oportunidades de reducción"
+                    "accion": f"Revisar gastos en {category} e identificar oportunidades de reducción",
+                    "criterio": f"Esta categoría supera el 20% del gasto ({percentage:.1f}%). El ahorro potencial es un 15% estimado para revisar contratos y volúmenes.",
                 })
         
         return recommendations
@@ -262,7 +296,8 @@ class RecommendationEngine:
                         "ahorro_potencial": round((max_monto - avg_monto), 2),
                         "impacto_potencial": round((max_monto - avg_monto), 2),
                         "mensaje": f"{provider} tuvo un incremento de {round(((max_monto - avg_monto) / avg_monto * 100), 1)}% en último gasto",
-                        "accion": f"Contactar a {provider} para aclarar el incremento de precio"
+                        "accion": f"Contactar a {provider} para aclarar el incremento de precio",
+                        "criterio": "Un cobro supera 2,5 veces el promedio histórico de este proveedor. El ahorro es la diferencia respecto al promedio.",
                     })
         
         return recommendations

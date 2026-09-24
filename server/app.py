@@ -43,9 +43,10 @@ OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434')
 # Importar módulos
 from database import init_db, get_db, SessionLocal, save_json, load_json
 from models import (
-    Empresa, CentroCosto, CategoriaContable, Documento, 
-    TipoDocumento, EstadoRevision
+    Empresa, CentroCosto, CategoriaContable, Documento,
+    TipoDocumento, EstadoRevision, SesionProcesamiento
 )
+from default_categories import seed_default_categories
 from orchestration import DocumentProcessingPipeline
 from pipeline_agent import DocumentPipelineAgent
 from analytics import AnalyticsEngine
@@ -423,9 +424,13 @@ async def create_empresa(empresa: EmpresaCreate):
     try:
         razon_social = empresa.get_razon_social()
         rut = empresa.rut or "00.000.000-0"
+        cleaned_rut = (rut or "").replace(".", "").replace("-", "").replace(" ", "")
+        placeholder_rut = cleaned_rut in {"", "000000000", "0"} or str(rut).upper().startswith("SIN-RUT-")
+        if placeholder_rut:
+            rut = f"SIN-RUT-{uuid.uuid4().hex[:8].upper()}"
 
-        # Verificar si ya existe una empresa con este RUT
-        existing = db.query(Empresa).filter(Empresa.rut == rut).first()
+        # Verificar si ya existe una empresa con este RUT (omite placeholders)
+        existing = None if placeholder_rut else db.query(Empresa).filter(Empresa.rut == rut).first()
         if existing:
             # Actualizar datos si se proporcionan nuevos valores
             updated = False
@@ -440,6 +445,7 @@ async def create_empresa(empresa: EmpresaCreate):
                 updated = True
             if updated:
                 db.commit()
+            seed_default_categories(db, existing.id)
             return {
                 "id": existing.id,
                 "razon_social": existing.razon_social,
@@ -462,7 +468,8 @@ async def create_empresa(empresa: EmpresaCreate):
         )
         db.add(new_empresa)
         db.commit()
-        
+        seed_default_categories(db, empresa_id)
+
         return {
             "id": empresa_id,
             "razon_social": razon_social,
@@ -498,6 +505,42 @@ async def list_empresas():
                 for e in empresas
             ]
         }
+    finally:
+        db.close()
+
+
+@app.delete("/api/empresas/{empresa_id}")
+async def delete_empresa(empresa_id: str):
+    """Elimina una empresa y sus documentos, categorías y centros de costo."""
+    db = SessionLocal()
+    try:
+        empresa = db.query(Empresa).filter(Empresa.id == empresa_id).first()
+        if not empresa:
+            raise HTTPException(status_code=404, detail="Empresa no encontrada")
+
+        docs = db.query(Documento).filter(Documento.empresa_id == empresa_id).all()
+        for doc in docs:
+            ruta = Path(doc.ruta_archivo_original) if doc.ruta_archivo_original else None
+            if ruta and ruta.exists() and _validate_path_within(ruta, UPLOADS_DIR):
+                try:
+                    ruta.unlink()
+                except OSError:
+                    pass
+            doc.categoria_id = None
+            doc.centro_costo_id = None
+        db.flush()
+        db.query(Documento).filter(Documento.empresa_id == empresa_id).delete()
+        db.query(CategoriaContable).filter(CategoriaContable.empresa_id == empresa_id).delete()
+        db.query(CentroCosto).filter(CentroCosto.empresa_id == empresa_id).delete()
+        db.query(SesionProcesamiento).filter(SesionProcesamiento.empresa_id == empresa_id).delete()
+        db.delete(empresa)
+        db.commit()
+        return {"ok": True, "id": empresa_id, "mensaje": "Empresa eliminada"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     finally:
         db.close()
 
@@ -626,7 +669,13 @@ async def list_categories(empresa_id: str):
             CategoriaContable.empresa_id == empresa_id,
             CategoriaContable.activa == True
         ).all()
-        
+        if not categories:
+            seed_default_categories(db, empresa_id)
+            categories = db.query(CategoriaContable).filter(
+                CategoriaContable.empresa_id == empresa_id,
+                CategoriaContable.activa == True
+            ).all()
+
         return {
             "categorias": [
                 {
@@ -1853,7 +1902,7 @@ async def get_agents():
     return {"agents": sanitized_agents}
 
 # Campos que un usuario puede modificar en la configuración de agentes
-_AGENT_EDITABLE_FIELDS = {"modelo", "prompt", "system_prompt", "parametros", "nombre", "descripcion"}
+_AGENT_EDITABLE_FIELDS = {"modelo", "prompt", "system_prompt", "parametros", "nombre", "descripcion", "contexto"}
 
 @app.put("/api/agents/{agent_id}")
 async def update_agent(agent_id: str, config: dict):

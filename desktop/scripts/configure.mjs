@@ -153,6 +153,7 @@ const tauriConf = {
         minHeight: (cfg.window && cfg.window.minHeight) || 600,
         resizable: true,
         center: true,
+        dragDropEnabled: false,
       },
     ],
     security: { csp: null },
