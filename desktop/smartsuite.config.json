@@ -3,7 +3,7 @@
   "publisher": "Cámara de Comercio de Santiago",
   "productName": "SmartGastos",
   "identifier": "cl.ccs.smartgastos",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "dataDirName": "SmartGastos",
   "accent": "#00D53A",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
@@ -13,11 +13,11 @@
   "splashLogo": "../app/logo-ccs.png",
   "ollama": {
     "tiers": [
-      { "maxRamGb": 6, "model": "llama3.2:1b" },
-      { "maxRamGb": 12, "model": "llama3.2:3b" },
-      { "maxRamGb": 0, "model": "llama3.1:8b" }
-    ],
-    "extraModels": ["moondream"]
+      { "maxRamGb": 7, "id": "liviano", "label": "Liviano", "model": "llama3.2:1b", "extraModels": [] },
+      { "maxRamGb": 13, "id": "estandar", "label": "Estándar", "model": "llama3.2:3b", "extraModels": [] },
+      { "maxRamGb": 24, "id": "completo", "label": "Completo", "model": "llama3.2:3b", "extraModels": ["moondream"] },
+      { "maxRamGb": 0, "id": "maximo", "label": "Máximo", "model": "llama3.1:8b", "extraModels": ["moondream"] }
+    ]
   },
   "pyinstaller": {
     "excludes": ["easyocr", "torch", "torchvision", "scipy", "skimage", "scikit_image", "ninja"]

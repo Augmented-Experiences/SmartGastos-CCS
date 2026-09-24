@@ -213,6 +213,24 @@ def check_ollama() -> bool:
         return False
 
 
+def _attach_profile(result: Dict, data_dir: Path) -> Dict:
+    try:
+        from hardware_profile import load_active_profile, select_profile, describe_profile
+        hw = result.get("hardware") or {}
+        profile = load_active_profile(str(data_dir)) or select_profile(hw.get("ram_gb") or 0)
+        result["profile"] = {
+            "id": profile.get("id"),
+            "label": profile.get("label"),
+            "model": profile.get("model"),
+            "extra_models": profile.get("extra_models") or profile.get("extraModels") or [],
+            "ram_gb": hw.get("ram_gb"),
+            "summary": describe_profile(profile, hw.get("ram_gb")),
+        }
+    except Exception as e:
+        logger.debug("No se pudo adjuntar perfil de RAM: %s", e)
+    return result
+
+
 def get_hardware_performance(data_dir: Path, force: bool = False) -> Dict:
     """
     Retorna rendimiento estimado de cada modelo disponible.
@@ -225,7 +243,7 @@ def get_hardware_performance(data_dir: Path, force: bool = False) -> Dict:
         try:
             cached = json.loads(cache_file.read_text(encoding="utf-8"))
             if cached:
-                return cached
+                return _attach_profile(cached, data_dir)
         except Exception:
             pass
 
@@ -252,6 +270,7 @@ def get_hardware_performance(data_dir: Path, force: bool = False) -> Dict:
         "models": model_results,
         "total_models": len(models)
     }
+    _attach_profile(result, data_dir)
 
     # Guardar en cache
     try:
@@ -271,15 +290,12 @@ def get_readiness(data_dir: Path) -> Dict:
     ollama_ok = check_ollama()
     models = get_available_models() if ollama_ok else []
 
-    # Leer modelo por defecto de config
-    config_file = data_dir / "config.json"
-    default_model = "llama3.1:8b"
-    if config_file.exists():
-        try:
-            config = json.loads(config_file.read_text(encoding="utf-8"))
-            default_model = config.get("default_model", config.get("textModel", default_model))
-        except Exception:
-            pass
+    from hardware_profile import load_active_profile, select_profile, describe_profile
+    from ollama_client import _launcher_model
+
+    hw = detect_hardware()
+    profile = load_active_profile(str(data_dir)) or select_profile(hw.get("ram_gb") or 0)
+    default_model = _launcher_model() or profile.get("model") or "llama3.2:3b"
 
     # Verificar si el modelo por defecto está disponible
     model_ready = any(
@@ -311,5 +327,13 @@ def get_readiness(data_dir: Path) -> Dict:
         "default_model": default_model,
         "available_models": models,
         "models_count": len(models),
-        "message": message
+        "message": message,
+        "profile": {
+            "id": profile.get("id"),
+            "label": profile.get("label"),
+            "model": profile.get("model") or default_model,
+            "extra_models": profile.get("extra_models") or profile.get("extraModels") or [],
+            "ram_gb": hw.get("ram_gb"),
+            "summary": describe_profile(profile, hw.get("ram_gb")),
+        },
     }

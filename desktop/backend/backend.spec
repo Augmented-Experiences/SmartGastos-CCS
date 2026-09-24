@@ -74,6 +74,7 @@ hiddenimports = [
     "default_categories",
     "security",
     "hardware",
+    "hardware_profile",
     "ollama_client",
     "agents",
     "agents.ocr_agent",

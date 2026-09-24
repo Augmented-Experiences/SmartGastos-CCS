@@ -20,11 +20,17 @@ mod ollama;
 
 const SHUTDOWN_WAIT_ATTEMPTS: u32 = 25;
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Tier {
     max_ram_gb: f64,
     model: String,
+    #[serde(default)]
+    extra_models: Vec<String>,
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    label: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -634,20 +640,62 @@ fn try_mark_backend_ready(app: &tauri::AppHandle, port: u16) -> bool {
     }
 }
 
-fn model_for_ram() -> String {
+fn ram_gb() -> f64 {
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
-    let gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+    sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0
+}
+
+fn profile_for_ram() -> Tier {
+    let gb = ram_gb();
     let cfg = app_config();
+    let mut chosen = None;
     for t in &cfg.ollama_tiers {
         if t.max_ram_gb > 0.0 && gb < t.max_ram_gb {
-            return t.model.clone();
+            chosen = Some(t.clone());
+            break;
         }
     }
-    cfg.ollama_tiers
-        .last()
-        .map(|t| t.model.clone())
-        .unwrap_or_else(|| "llama3.2:3b".to_string())
+    let mut profile = chosen
+        .or_else(|| cfg.ollama_tiers.last().cloned())
+        .unwrap_or_else(|| Tier {
+            max_ram_gb: 0.0,
+            model: "llama3.2:3b".to_string(),
+            extra_models: Vec::new(),
+            id: "estandar".to_string(),
+            label: "Estándar".to_string(),
+        });
+    if profile.id.is_empty() {
+        profile.id = "auto".to_string();
+    }
+    if profile.label.is_empty() {
+        profile.label = profile.model.clone();
+    }
+    ollama_log(&format!(
+        "perfil {} ({:.1} GB RAM) modelo={} extras={:?}",
+        profile.label, gb, profile.model, profile.extra_models
+    ));
+    profile
+}
+
+fn model_for_ram() -> String {
+    profile_for_ram().model
+}
+
+fn persist_active_profile(profile: &Tier) {
+    let home = ollama::ollama_home(&user_data_dir());
+    let _ = std::fs::create_dir_all(&home);
+    let _ = std::fs::write(home.join("active_model.txt"), &profile.model);
+    let payload = serde_json::json!({
+        "id": profile.id,
+        "label": profile.label,
+        "model": profile.model,
+        "extraModels": profile.extra_models,
+        "ramGb": ram_gb(),
+    });
+    if let Ok(text) = serde_json::to_string_pretty(&payload) {
+        let _ = std::fs::write(home.join("active_profile.json"), text);
+    }
 }
 
 fn status_progress(app: &tauri::AppHandle, phase: &str, percent: i32, message: &str) {
@@ -862,22 +910,25 @@ fn bootstrap_ollama(
             return;
         }
 
-        let model = model_for_ram();
-        if pull_model_with_progress(&app, ollama_port, &model) {
-            let marker = ollama::ollama_home(&user_data_dir()).join("active_model.txt");
-            let _ = std::fs::create_dir_all(ollama::ollama_home(&user_data_dir()));
-            let _ = std::fs::write(&marker, &model);
+        let profile = profile_for_ram();
+        if pull_model_with_progress(&app, ollama_port, &profile.model) {
+            persist_active_profile(&profile);
             ollama_log(&format!(
-                "Modelo {} listo en /api/tags; chat debe usar este si el agente pide otro",
-                model
+                "Modelo {} listo (perfil {}); chat debe usar este si el agente pide otro",
+                profile.model, profile.label
             ));
         }
 
-        for extra in &app_config().extra_models {
+        let extras = if profile.extra_models.is_empty() {
+            Vec::new()
+        } else {
+            profile.extra_models.clone()
+        };
+        for extra in extras {
             if shutdown_requested(&app) {
                 return;
             }
-            let _ = pull_model_with_progress(&app, ollama_port, extra);
+            let _ = pull_model_with_progress(&app, ollama_port, &extra);
             ollama_log(&format!("Modelo adicional '{}' listo.", extra));
             status_progress(
                 &app,
@@ -934,12 +985,15 @@ fn main() {
             }
             let ollama_url = ollama::api_base(ollama_port);
             let ollama_host = format!("127.0.0.1:{}", ollama_port);
-            let ram_model = model_for_ram();
+            let ram_profile = profile_for_ram();
+            let ram_model = ram_profile.model.clone();
             ollama_log(&format!(
-                "sidecar env OLLAMA_URL={} OLLAMA_MODEL={} (agentes deben usar este si su modelo no esta)",
+                "sidecar env OLLAMA_URL={} OLLAMA_MODEL={} OLLAMA_PROFILE={} (agentes deben usar este si su modelo no esta)",
                 ollama_url,
-                ram_model
+                ram_model,
+                ram_profile.id
             ));
+            persist_active_profile(&ram_profile);
             let sidecar = app.shell().sidecar("backend");
             match sidecar {
                 Ok(cmd) => match cmd
@@ -950,6 +1004,7 @@ fn main() {
                     .env("OLLAMA_URL", ollama_url)
                     .env("OLLAMA_HOST", ollama_host)
                     .env("OLLAMA_MODEL", ram_model)
+                    .env("OLLAMA_PROFILE", ram_profile.id.clone())
                     .spawn()
                 {
                     Ok((mut rx, child)) => {

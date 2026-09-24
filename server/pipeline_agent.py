@@ -1160,10 +1160,8 @@ class DocumentPipelineAgent:
         doc_id = str(uuid.uuid4())
         ext = Path(file_path).suffix.lower()
         vision_model, llama_model = self._get_models()
-        # Alias para compatibilidad con el resto del pipeline
-        # text_model: para agentes que no necesitan visión, usar el mejor texto disponible
-        text_model = _find_best_model(TEXT_MODELS, self._available_models or []) or vision_model or llama_model
-        # llama_model para Clasificador/Auditor
+        # En desktop el perfil de RAM (OLLAMA_MODEL) es el modelo de texto.
+        text_model = llama_model or _find_best_model(TEXT_MODELS, self._available_models or []) or vision_model
 
         # Determinar si el archivo es una imagen (para enviar a modelos de visión)
         is_image = ext in (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp")
@@ -1389,15 +1387,12 @@ class DocumentPipelineAgent:
         # Produce: campos estructurados consolidados
         cfg_extractor = self._get_agent_config("extractor")
         if _desktop_sidecar():
-            extractor_model_to_use = _find_best_model(
-                DESKTOP_EXTRACTOR_MODELS,
-                self._available_models or [],
-            ) or text_model
+            from ollama_client import resolve_ollama_model
+            extractor_model_to_use = resolve_ollama_model(
+                text_model or llama_model or cfg_extractor.get("modelo") or LLAMA_MODEL
+            )
             if extractor_model_to_use and _model_supports_vision(extractor_model_to_use):
-                extractor_model_to_use = (
-                    _find_best_model(DESKTOP_EXTRACTOR_MODELS, self._available_models or [])
-                    or text_model
-                )
+                extractor_model_to_use = resolve_ollama_model(LLAMA_MODEL)
         elif img_b64:
             extractor_model_to_use = _resolve_vision_model(
                 cfg_extractor["modelo"] or vision_model,
@@ -1787,7 +1782,10 @@ class DocumentPipelineAgent:
 
             # Auditoría con LLM si está disponible (para detectar anomalías semánticas)
             auditor_model_to_use = cfg_auditor["modelo"] or llama_model or text_model
-            if self._available_models is not None:
+            if _desktop_sidecar():
+                from ollama_client import resolve_ollama_model
+                auditor_model_to_use = resolve_ollama_model(auditor_model_to_use or LLAMA_MODEL)
+            elif self._available_models is not None:
                 resolved_auditor = _find_best_model(
                     [auditor_model_to_use], self._available_models
                 )

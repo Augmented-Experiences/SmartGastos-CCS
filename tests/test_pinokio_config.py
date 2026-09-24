@@ -285,7 +285,12 @@ class TestUIFiles(unittest.TestCase):
         self.assertEqual(cfg.get("accent"), "#00D53A")
         self.assertEqual(cfg.get("splashLogo"), "../app/logo-ccs.png")
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
-        self.assertIn("moondream", extra)
+        tiers = (cfg.get("ollama") or {}).get("tiers") or []
+        extras_in_tiers = [m for t in tiers for m in (t.get("extraModels") or [])]
+        self.assertTrue(
+            "moondream" in extra or "moondream" in extras_in_tiers,
+            "moondream debe estar en extraModels globales o del perfil Completo/Máximo",
+        )
 
     def test_ui_uses_ccs_png_wordmark_and_favicon(self):
         index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
@@ -389,7 +394,8 @@ class TestPortableOllama(unittest.TestCase):
     def test_sidecar_passes_ollama_model_env(self):
         self.assertIn('.env("OLLAMA_MODEL"', self.main)
         self.assertIn("active_model.txt", self.main)
-        self.assertIn("let ram_model = model_for_ram()", self.main)
+        self.assertIn("profile_for_ram", self.main)
+        self.assertIn("let ram_model = ram_profile.model.clone()", self.main)
 
     def test_product_models_are_llama31_and_moondream(self):
         import json
@@ -398,10 +404,14 @@ class TestPortableOllama(unittest.TestCase):
         )
         extra = (cfg.get("ollama") or {}).get("extraModels") or []
         tiers = (cfg.get("ollama") or {}).get("tiers") or []
-        self.assertIn("moondream", extra)
+        extras_in_tiers = [m for t in tiers for m in (t.get("extraModels") or [])]
+        self.assertTrue("moondream" in extra or "moondream" in extras_in_tiers)
         self.assertTrue(any(t.get("model") == "llama3.1:8b" for t in tiers))
+        self.assertTrue(any(t.get("id") == "estandar" and t.get("model") == "llama3.2:3b" for t in tiers))
         self.assertIn("extra_models", self.main)
         self.assertIn("model_for_ram", self.main)
+        self.assertIn("profile_for_ram", self.main)
+        self.assertIn("active_profile.json", self.main)
 
     def test_linux_docker_build_script_exists(self):
         script = (REPO_ROOT / "desktop" / "scripts" / "linux-docker-build.sh").read_text(
@@ -470,7 +480,11 @@ class TestSplashSingleWhiteLogo(unittest.TestCase):
         extra = json.loads(
             (REPO_ROOT / "desktop" / "smartsuite.config.json").read_text(encoding="utf-8")
         )
-        self.assertIn("moondream", (extra.get("ollama") or {}).get("extraModels") or [])
+        ollama = extra.get("ollama") or {}
+        extras_in_tiers = [m for t in (ollama.get("tiers") or []) for m in (t.get("extraModels") or [])]
+        self.assertTrue(
+            "moondream" in (ollama.get("extraModels") or []) or "moondream" in extras_in_tiers
+        )
 
 
 if __name__ == '__main__':

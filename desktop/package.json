@@ -1,6 +1,6 @@
 {
   "name": "smartgastos-desktop",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "private": true,
   "description": "Instalador/app de escritorio nativo de SmartGastos (Tauri) — Cámara de Comercio de Santiago",
   "scripts": {

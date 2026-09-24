@@ -14,6 +14,7 @@ Incluye:
 import json
 import logging
 import os
+import sys
 import threading
 from typing import Dict, Optional
 
@@ -149,12 +150,29 @@ def _launcher_model() -> str:
 def resolve_ollama_model(requested: str) -> str:
     """Usa el modelo pedido si está en /api/tags; si no, el que el launcher ya bajó.
 
-    Bug Oscar (Caja, mismo en Gastos): splash bajó llama3.1:8b (RAM) y chat/agentes
-    pedían llama3.2:3b → POST /api/chat 404 → 503, con /api/health en 200.
+    En el sidecar desktop el perfil de RAM manda: un PC de 8 GB no debe
+    terminar en llama3.1:8b solo porque quedó de una instalación anterior.
     """
     names = _ollama_model_names()
     env_model = _launcher_model()
     want = (requested or "").strip()
+    desktop = os.environ.get("RUN_BY_TAURI") == "1" or bool(getattr(sys, "frozen", False))
+
+    if desktop and env_model and not _is_vision_name(want):
+        for n in names:
+            if n == env_model or _model_name_matches(n, env_model):
+                if want and want != n:
+                    logger.info(
+                        "Perfil de RAM: usando %s en lugar de %s",
+                        n,
+                        want,
+                    )
+                return n
+        logger.warning(
+            "Perfil de RAM pide %s y aún no está en /api/tags; se usará igual",
+            env_model,
+        )
+        return env_model
 
     if want:
         for n in names:

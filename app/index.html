@@ -1883,10 +1883,13 @@ function updateModelPill(d) {
   const sub = document.getElementById('modelSubtitle');
   if (!dot || !name) return;
 
-  if (d.ready) {
+    if (d.ready) {
     dot.className = 'model-dot online';
     name.textContent = 'Motor IA activo';
-    if (sub) sub.textContent = `${d.models_count} modelo(s) • ${d.default_model}`;
+    if (sub) {
+      const prof = d.profile && d.profile.label ? `perfil ${d.profile.label} · ` : '';
+      sub.textContent = `${prof}${d.default_model}`;
+    }
   } else if (d.status === 'model_missing') {
     dot.className = 'model-dot';
     dot.style.background = 'var(--yellow)';
@@ -1925,9 +1928,21 @@ function renderModelSemaphore(container) {
   }
   const hw = state.hardwarePerf.hardware;
   const models = state.hardwarePerf.models;
+  const profile = state.hardwarePerf.profile || {};
+  const extras = profile.extra_models || profile.extraModels || [];
+  const vision = extras.length ? 'RapidOCR + moondream' : 'RapidOCR';
   container.innerHTML = `
+    <div style="margin-bottom:12px;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:4px">Perfil ${escHtml(profile.label || 'automático')}</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5">
+        ${hw.ram_gb || '—'} GB RAM · modelo ${escHtml(profile.model || 'detectando…')} · ${escHtml(vision)}
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px;line-height:1.45">
+        SmartGastos elige el modelo según la memoria de este equipo. En 8 GB usa llama3.2:3b y RapidOCR, sin cargar moondream.
+      </div>
+    </div>
     <div style="margin-bottom:10px;font-size:12px;color:var(--text2)">
-      <strong>Hardware:</strong> ${hw.cpu_name || 'CPU'} • ${hw.ram_gb} GB RAM • ${hw.gpu_name}
+      <strong>Hardware:</strong> ${escHtml(hw.cpu_name || 'CPU')} • ${hw.ram_gb} GB RAM • ${escHtml(hw.gpu_name || '')}
     </div>
     <div class="semaphore-grid">
       ${models.map(m => `

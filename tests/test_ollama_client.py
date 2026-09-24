@@ -121,6 +121,17 @@ class TestOllamaModelFallback(unittest.TestCase):
         with patch("ollama_client.requests.get", return_value=tags):
             self.assertEqual(resolve_ollama_model("llama3.2:3b"), "llama3.2:3b")
 
+    def test_desktop_prefers_launcher_profile_over_heavier_installed(self):
+        from ollama_client import resolve_ollama_model
+        tags = MagicMock()
+        tags.status_code = 200
+        tags.json.return_value = {
+            "models": [{"name": "llama3.2:3b"}, {"name": "llama3.1:8b"}]
+        }
+        with patch("ollama_client.requests.get", return_value=tags):
+            with patch.dict(os.environ, {"OLLAMA_MODEL": "llama3.2:3b", "RUN_BY_TAURI": "1"}):
+                self.assertEqual(resolve_ollama_model("llama3.1:8b"), "llama3.2:3b")
+
     def test_vision_resolve_keeps_moondream_not_text_llm(self):
         from ollama_client import resolve_ollama_vision_model
         tags = MagicMock()

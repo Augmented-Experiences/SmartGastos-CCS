@@ -182,7 +182,13 @@ writeFileSync(
 
 // --- 2) appconfig.json (lo lee Rust vía include_str!) ---
 const tiers = ((cfg.ollama && cfg.ollama.tiers) || [{ maxRamGb: 0, model: "llama3.2:3b" }]).map(
-  (t) => ({ maxRamGb: Number(t.maxRamGb) || 0, model: String(t.model) })
+  (t) => ({
+    maxRamGb: Number(t.maxRamGb) || 0,
+    model: String(t.model),
+    extraModels: Array.isArray(t.extraModels) ? t.extraModels.map(String) : [],
+    id: String(t.id || ""),
+    label: String(t.label || t.model),
+  })
 );
 const extraModels = ((cfg.ollama && cfg.ollama.extraModels) || []).map(String);
 const appConfig = {
