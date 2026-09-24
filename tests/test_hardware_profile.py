@@ -1,5 +1,6 @@
 """Perfiles de RAM para elegir modelo Ollama."""
 import unittest
+from unittest.mock import patch
 
 from hardware_profile import select_profile
 
@@ -10,6 +11,21 @@ class TestHardwareProfile(unittest.TestCase):
         self.assertEqual(p["id"], "liviano")
         self.assertEqual(p["model"], "llama3.2:1b")
         self.assertEqual(p["extra_models"], [])
+
+    def test_access_block_warn_ok(self):
+        from hardware_profile import access_for_ram
+        self.assertEqual(access_for_ram(6.9)["level"], "block")
+        self.assertEqual(access_for_ram(7.0)["level"], "warn")
+        self.assertEqual(access_for_ram(8)["level"], "warn")
+        self.assertEqual(access_for_ram(12)["level"], "warn")
+        self.assertEqual(access_for_ram(16)["level"], "ok")
+        self.assertEqual(access_for_ram(0)["level"], "ok")
+
+    def test_access_override_env(self):
+        from hardware_profile import access_for_ram
+        with patch.dict("os.environ", {"SMARTSUITE_ALLOW_LOW_RAM": "1"}):
+            self.assertEqual(access_for_ram(4)["level"], "ok")
+            self.assertTrue(access_for_ram(4)["override"])
 
     def test_8gb_uses_3b_without_moondream(self):
         p = select_profile(8)

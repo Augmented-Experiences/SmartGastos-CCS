@@ -1770,10 +1770,10 @@ DEFAULT_AGENTS = [
     {
         "id": "ocr",
         "nombre": "Agente OCR",
-        "descripcion": "Extrae texto de imágenes y PDFs usando Tesseract multi-PSM con preprocesamiento adaptativo. No usa LLM — produce el texto bruto que alimenta a todos los agentes siguientes.",
+        "descripcion": "Extrae texto de imágenes y PDFs con RapidOCR. No usa un modelo de lenguaje: produce el texto bruto que alimenta a los agentes siguientes.",
         "icono": "🔍",
         "tipo": "ocr",
-        "modelo": "tesseract",
+        "modelo": "rapidocr",
         "contexto": "por_documento",
         "prompt": "",
         "system_prompt": "",
@@ -1788,7 +1788,7 @@ DEFAULT_AGENTS = [
     {
         "id": "vision",
         "nombre": "Agente Visual",
-        "descripcion": "Analiza visualmente la imagen del documento con motor IA. Recibe la IMAGEN + texto OCR del paso anterior para complementar y corregir la extracción. Contexto: por_documento (se limpia en cada lectura).",
+        "descripcion": "Analiza la imagen del documento cuando el perfil de RAM incluye moondream (Completo o Máximo). En 8 GB este paso se omite y manda RapidOCR.",
         "icono": "👁",
         "tipo": "vision",
         "modelo": "moondream",
@@ -1804,10 +1804,10 @@ DEFAULT_AGENTS = [
     {
         "id": "extractor",
         "nombre": "Agente Extractor",
-        "descripcion": "Consolida campos estructurados a partir de OCR + Agente Visual. Recibe la IMAGEN + texto OCR + campos visuales. Usa IA + regex para máxima cobertura. Contexto: por_documento.",
+        "descripcion": "Consolida campos estructurados a partir del texto OCR. Usa el modelo de texto del perfil de RAM (un LLM por equipo). Contexto: por_documento.",
         "icono": "🧠",
         "tipo": "extractor",
-        "modelo": "moondream",
+        "modelo": "perfil",
         "contexto": "por_documento",
         "prompt": "",
         "system_prompt": "Eres el Agente Extractor, un contador experto en documentos contables latinoamericanos. Tu rol es extraer campos estructurados del documento con máxima precisión. Eres el tercer agente en el pipeline — tienes el texto OCR y los campos detectados por el Agente Visual. Debes consolidar y completar la información, priorizando los valores más confiables. Responde SOLO con JSON válido, sin texto adicional ni markdown.",
@@ -1820,10 +1820,10 @@ DEFAULT_AGENTS = [
     {
         "id": "clasificador",
         "nombre": "Agente Clasificador",
-        "descripcion": "Determina la categoría contable del gasto usando todos los campos extraídos por los agentes anteriores + texto completo del documento. Usa llama3.2 optimizado para razonamiento estructurado. Contexto: por_documento.",
+        "descripcion": "Determina la categoría contable del gasto usando todos los campos extraídos por los agentes anteriores + texto completo del documento. Usa el modelo de texto del perfil de RAM. Contexto: por_documento.",
         "icono": "🏷",
         "tipo": "clasificador",
-        "modelo": "llama3.2:3b",
+        "modelo": "perfil",
         "contexto": "por_documento",
         "prompt": "",
         "system_prompt": "Eres el Agente Clasificador, un contador experto en categorización de gastos empresariales latinoamericanos. Tu rol es determinar la categoría contable más apropiada para este gasto. Tienes acceso a TODA la información extraída por los agentes anteriores (OCR, análisis visual, extracción de campos). Analiza el proveedor, descripción, monto y tipo de documento para determinar la categoría correcta. Responde SOLO con JSON válido, sin texto adicional ni markdown.",
@@ -1836,10 +1836,10 @@ DEFAULT_AGENTS = [
     {
         "id": "auditor",
         "nombre": "Agente Auditor",
-        "descripcion": "Valida coherencia del documento, detecta duplicados y anomalías. Recibe TODOS los campos + clasificación + imagen. Usa llama3.2 para razonamiento lógico y detección semántica. Contexto: por_documento.",
+        "descripcion": "Valida coherencia del documento, detecta duplicados y anomalías. Recibe todos los campos + clasificación. Usa el modelo de texto del perfil. Contexto: por_documento.",
         "icono": "🛡",
         "tipo": "auditor",
-        "modelo": "llama3.2:3b",
+        "modelo": "perfil",
         "contexto": "por_documento",
         "prompt": "",
         "system_prompt": "Eres el Agente Auditor, un experto en control interno y detección de anomalías contables. Tu rol es validar la coherencia del documento y detectar problemas. Tienes acceso a TODA la información del pipeline: OCR, visión, extracción y clasificación. Verifica: coherencia de montos (neto + IVA = total), fechas razonables, proveedor legítimo, campos críticos presentes. Responde SOLO con JSON válido, sin texto adicional ni markdown.",
@@ -1856,10 +1856,10 @@ DEFAULT_AGENTS = [
     {
         "id": "recomendador",
         "nombre": "Agente Recomendador",
-        "descripcion": "Analiza el historial de gastos y genera recomendaciones de optimización. Usa llama3.2 con historial mensual compactado. Contexto: historial_mensual — acumula memoria del mes y compacta al cambiar de mes.",
+        "descripcion": "Analiza el historial de gastos y genera recomendaciones. Usa el modelo de texto del perfil con historial mensual compactado. Contexto: historial_mensual.",
         "icono": "💡",
         "tipo": "recomendador",
-        "modelo": "llama3.2:3b",
+        "modelo": "perfil",
         "contexto": "historial_mensual",
         "prompt": "",
         "system_prompt": "Eres el Agente Recomendador, un asesor financiero experto en PYMEs latinoamericanas. Tienes acceso al historial de gastos del mes actual y resúmenes compactados de meses anteriores. Tu rol es: (1) detectar patrones de gasto recurrentes, (2) identificar gastos anómalos o duplicados entre meses, (3) sugerir optimizaciones concretas con impacto estimado en dinero, (4) alertar sobre gastos que no corresponden al giro de la empresa. Cuando el mes cambia, el historial se compacta en un resumen que se preserva indefinidamente para comparaciones históricas. Responde SOLO con JSON válido.",
@@ -1875,10 +1875,32 @@ DEFAULT_AGENTS = [
 
 _AGENTS_FILE = DATA_DIR / "agents_config.json"
 
+def _normalize_agents(agents):
+    """Alinea configs guardadas al contrato: OCR RapidOCR, texto = modelo del perfil."""
+    out = []
+    for raw in agents or []:
+        agent = dict(raw)
+        aid = agent.get("id")
+        modelo = str(agent.get("modelo") or "").strip()
+        low = modelo.lower()
+        if aid == "ocr" and low in ("tesseract", ""):
+            agent["modelo"] = "rapidocr"
+        elif aid == "extractor" and "moondream" in low:
+            agent["modelo"] = "perfil"
+        elif aid in ("extractor", "clasificador", "auditor", "recomendador") and low in (
+            "llama3.2:3b",
+            "llama3.1:8b",
+            "llama3:8b",
+            "qwen3:0.6b",
+        ):
+            agent["modelo"] = "perfil"
+        out.append(agent)
+    return out
+
 def _load_agents():
     if _AGENTS_FILE.exists():
         try:
-            return json.loads(_AGENTS_FILE.read_text(encoding="utf-8"))
+            return _normalize_agents(json.loads(_AGENTS_FILE.read_text(encoding="utf-8")))
         except Exception:
             pass
     return DEFAULT_AGENTS

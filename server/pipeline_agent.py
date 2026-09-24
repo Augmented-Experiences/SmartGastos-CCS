@@ -1115,7 +1115,7 @@ class DocumentPipelineAgent:
             # VISION: Usa VISION_DEFAULT_MODEL (moondream) porque necesita soporte multimodal.
             # qwen3:0.6b NO soporta imágenes y falla silenciosamente en Windows.
             "vision":       {"modelo": VISION_DEFAULT_MODEL,  "timeout": 300, "temperature": 0.1, "max_tokens": 4096},
-            "extractor":    {"modelo": VISION_DEFAULT_MODEL, "timeout": 240, "temperature": 0.1, "max_tokens": 3000},
+            "extractor":    {"modelo": LLAMA_MODEL, "timeout": 240, "temperature": 0.1, "max_tokens": 3000},
             "clasificador": {"modelo": LLAMA_MODEL, "timeout": 120, "temperature": 0.05, "max_tokens": 1024},
             "auditor":      {"modelo": LLAMA_MODEL, "timeout": 180, "temperature": 0.05, "max_tokens": 2048},
             "recomendador": {"modelo": LLAMA_MODEL, "timeout": 240, "temperature": 0.2,  "max_tokens": 3000},
@@ -1128,8 +1128,11 @@ class DocumentPipelineAgent:
                 for a in agents:
                     if a.get("id") == agent_id:
                         params = a.get("parametros", {})
+                        modelo = a.get("modelo") or d["modelo"]
+                        if str(modelo).strip().lower() in ("perfil", "auto"):
+                            modelo = d["modelo"]
                         return {
-                            "modelo": a.get("modelo") or d["modelo"],
+                            "modelo": modelo,
                             "prompt": a.get("prompt") or "",
                             "system_prompt": a.get("system_prompt") or "",
                             "timeout": params.get("timeout", d["timeout"]),

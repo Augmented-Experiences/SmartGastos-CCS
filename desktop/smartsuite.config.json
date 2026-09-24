@@ -3,7 +3,7 @@
   "publisher": "Cámara de Comercio de Santiago",
   "productName": "SmartGastos",
   "identifier": "cl.ccs.smartgastos",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "dataDirName": "SmartGastos",
   "accent": "#00D53A",
   "window": { "title": "SmartGastos", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640 },
@@ -19,6 +19,7 @@
       { "maxRamGb": 0, "id": "maximo", "label": "Máximo", "model": "llama3.1:8b", "extraModels": ["moondream"] }
     ]
   },
+  "access": { "blockBelowGb": 7, "warnBelowGb": 13 },
   "pyinstaller": {
     "excludes": ["easyocr", "torch", "torchvision", "scipy", "skimage", "scikit_image", "ninja"]
   }

@@ -156,6 +156,8 @@ def resolve_ollama_model(requested: str) -> str:
     names = _ollama_model_names()
     env_model = _launcher_model()
     want = (requested or "").strip()
+    if want.lower() in ("perfil", "auto"):
+        want = ""
     desktop = os.environ.get("RUN_BY_TAURI") == "1" or bool(getattr(sys, "frozen", False))
 
     if desktop and env_model and not _is_vision_name(want):

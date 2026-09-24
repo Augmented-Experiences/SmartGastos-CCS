@@ -99,6 +99,14 @@
 
     function render(s) {
       if (!s) return;
+      const phase = s.phase || '';
+      if (phase === 'blocked') {
+        trackEl.classList.remove('indeterminate');
+        fillEl.style.width = '0%';
+        pctEl.textContent = '';
+        statusEl.textContent = s.message || 'Este equipo no cumple el mínimo de 8 GB de RAM.';
+        return;
+      }
       const err = s.backendError ?? s.backend_error;
       const can = !!(s.canContinue ?? s.can_continue);
       const done = !!(s.ollamaDone ?? s.ollama_done);

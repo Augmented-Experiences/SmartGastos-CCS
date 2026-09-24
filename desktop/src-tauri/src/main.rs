@@ -33,6 +33,32 @@ struct Tier {
     label: String,
 }
 
+fn default_block_below_gb() -> f64 {
+    7.0
+}
+
+fn default_warn_below_gb() -> f64 {
+    13.0
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccessPolicy {
+    #[serde(default = "default_block_below_gb")]
+    block_below_gb: f64,
+    #[serde(default = "default_warn_below_gb")]
+    warn_below_gb: f64,
+}
+
+impl Default for AccessPolicy {
+    fn default() -> Self {
+        AccessPolicy {
+            block_below_gb: default_block_below_gb(),
+            warn_below_gb: default_warn_below_gb(),
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AppConfig {
@@ -41,6 +67,8 @@ struct AppConfig {
     ollama_tiers: Vec<Tier>,
     #[serde(default)]
     extra_models: Vec<String>,
+    #[serde(default)]
+    access: AccessPolicy,
 }
 
 static APP_CONFIG_JSON: &str = include_str!("../appconfig.json");
@@ -682,16 +710,61 @@ fn model_for_ram() -> String {
     profile_for_ram().model
 }
 
+fn low_ram_override() -> bool {
+    for key in ["SMARTSUITE_ALLOW_LOW_RAM", "SMARTGASTOS_ALLOW_LOW_RAM"] {
+        if let Ok(v) = std::env::var(key) {
+            let t = v.trim().to_ascii_lowercase();
+            if t == "1" || t == "true" || t == "yes" || t == "on" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn ram_access_level(gb: f64) -> &'static str {
+    if low_ram_override() || gb <= 0.0 {
+        return "ok";
+    }
+    let access = &app_config().access;
+    let block_at = if access.block_below_gb > 0.0 {
+        access.block_below_gb
+    } else {
+        7.0
+    };
+    let warn_at = if access.warn_below_gb > 0.0 {
+        access.warn_below_gb
+    } else {
+        13.0
+    };
+    if gb < block_at {
+        "block"
+    } else if gb < warn_at {
+        "warn"
+    } else {
+        "ok"
+    }
+}
+
+fn blocked_ram_message(gb: f64) -> String {
+    format!(
+        "Este equipo no cumple el mínimo. Se midieron {:.1} GB de RAM y se necesitan al menos 8 GB.",
+        gb
+    )
+}
+
 fn persist_active_profile(profile: &Tier) {
     let home = ollama::ollama_home(&user_data_dir());
     let _ = std::fs::create_dir_all(&home);
     let _ = std::fs::write(home.join("active_model.txt"), &profile.model);
+    let gb = ram_gb();
     let payload = serde_json::json!({
         "id": profile.id,
         "label": profile.label,
         "model": profile.model,
         "extraModels": profile.extra_models,
-        "ramGb": ram_gb(),
+        "ramGb": gb,
+        "access": ram_access_level(gb),
     });
     if let Ok(text) = serde_json::to_string_pretty(&payload) {
         let _ = std::fs::write(home.join("active_profile.json"), text);
@@ -816,6 +889,20 @@ fn bootstrap_ollama(
 ) {
     std::thread::spawn(move || {
         if shutdown_requested(&app) {
+            return;
+        }
+        let gb = ram_gb();
+        if ram_access_level(gb) == "block" {
+            persist_active_profile(&profile_for_ram());
+            let msg = blocked_ram_message(gb);
+            ollama_log(&msg);
+            update_status(&app, |s| {
+                s.phase = "blocked".into();
+                s.message = msg;
+                s.percent = -1;
+                s.can_continue = false;
+                s.ollama_done = false;
+            });
             return;
         }
         status_progress(&app, "ollama", -1, "Verificando el motor de IA (Ollama)...");
@@ -994,6 +1081,17 @@ fn main() {
                 ram_profile.id
             ));
             persist_active_profile(&ram_profile);
+            if ram_access_level(ram_gb()) == "block" {
+                let msg = blocked_ram_message(ram_gb());
+                ollama_log(&msg);
+                update_status(&handle, |s| {
+                    s.phase = "blocked".into();
+                    s.message = msg;
+                    s.percent = -1;
+                    s.can_continue = false;
+                    s.ollama_done = false;
+                });
+            }
             let sidecar = app.shell().sidecar("backend");
             match sidecar {
                 Ok(cmd) => match cmd

@@ -1,6 +1,6 @@
 [package]
 name = "smartgastos"
-version = "1.1.4"
+version = "1.1.5"
 description = "SmartGastos — gestión de gastos y contabilidad con IA local para PYMEs, de la Cámara de Comercio de Santiago (CCS)."
 authors = ["Cámara de Comercio de Santiago"]
 edition = "2021"

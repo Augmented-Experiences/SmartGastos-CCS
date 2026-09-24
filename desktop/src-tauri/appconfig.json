@@ -35,5 +35,9 @@
       "label": "Máximo"
     }
   ],
-  "extraModels": []
+  "extraModels": [],
+  "access": {
+    "blockBelowGb": 7,
+    "warnBelowGb": 13
+  }
 }

@@ -1,0 +1,13 @@
+---
+description: Contrato SmartSuite de perfiles RAM, un LLM por PC y acceso mínimo 8 GB
+alwaysApply: true
+---
+
+# SmartSuite local AI
+
+Sigue `.cursor/skills/smartsuite-local-ai-hardware/SKILL.md`.
+
+- Un LLM de texto por PC (perfil RAM). Prompts distintos, no modelos distintos.
+- RapidOCR; moondream solo Completo/Máximo.
+- Bloquear RAM `< 7` GB en splash. Avisar `7–13` GB. Fail open si RAM=0.
+- UI en español. No bajar todos los modelos. No tocar el SQLite del usuario.

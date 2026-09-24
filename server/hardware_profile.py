@@ -70,6 +70,42 @@ def load_active_profile(data_dir: Optional[str] = None) -> Optional[Dict]:
     return None
 
 
+BLOCK_BELOW_GB = 7.0
+WARN_BELOW_GB = 13.0
+
+
+def _truthy_env(*names: str) -> bool:
+    for name in names:
+        raw = (os.environ.get(name) or "").strip().lower()
+        if raw in ("1", "true", "yes", "on"):
+            return True
+    return False
+
+
+def access_for_ram(ram_gb: float) -> Dict:
+    """block < 7 GB, warn 8–12 GB, ok 16 GB+. RAM 0 = fail open."""
+    try:
+        gb = float(ram_gb)
+    except (TypeError, ValueError):
+        gb = 0.0
+    override = _truthy_env("SMARTSUITE_ALLOW_LOW_RAM", "SMARTGASTOS_ALLOW_LOW_RAM")
+    if override or gb <= 0:
+        level = "ok"
+    elif gb < BLOCK_BELOW_GB:
+        level = "block"
+    elif gb < WARN_BELOW_GB:
+        level = "warn"
+    else:
+        level = "ok"
+    return {
+        "level": level,
+        "ram_gb": gb,
+        "block_below_gb": BLOCK_BELOW_GB,
+        "warn_below_gb": WARN_BELOW_GB,
+        "override": override,
+    }
+
+
 def describe_profile(profile: Dict, ram_gb: Optional[float] = None) -> str:
     label = profile.get("label") or profile.get("id") or "Auto"
     model = profile.get("model") or ""

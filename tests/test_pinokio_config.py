@@ -291,6 +291,9 @@ class TestUIFiles(unittest.TestCase):
             "moondream" in extra or "moondream" in extras_in_tiers,
             "moondream debe estar en extraModels globales o del perfil Completo/Máximo",
         )
+        access = cfg.get("access") or {}
+        self.assertEqual(access.get("blockBelowGb"), 7)
+        self.assertEqual(access.get("warnBelowGb"), 13)
 
     def test_ui_uses_ccs_png_wordmark_and_favicon(self):
         index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
@@ -396,6 +399,8 @@ class TestPortableOllama(unittest.TestCase):
         self.assertIn("active_model.txt", self.main)
         self.assertIn("profile_for_ram", self.main)
         self.assertIn("let ram_model = ram_profile.model.clone()", self.main)
+        self.assertIn("ram_access_level", self.main)
+        self.assertIn("blocked_ram_message", self.main)
 
     def test_product_models_are_llama31_and_moondream(self):
         import json
@@ -431,6 +436,7 @@ class TestPortableOllama(unittest.TestCase):
         self.assertNotIn("Entrar ahora", self.splash)
         self.assertNotIn("id=\"enter\"", self.splash)
         self.assertIn("Cargando la aplicación...", self.splash)
+        self.assertIn("phase === 'blocked'", self.splash)
         self.assertNotIn("Use Entrar en el splash", self.main)
         self.assertIn("Cargando la aplicación...", self.main)
 
@@ -469,10 +475,10 @@ class TestSplashSingleWhiteLogo(unittest.TestCase):
         self.assertIn("logo-ccs-white.png", cfg_js)
         self.assertIn("rmSync", cfg_js)
         self.assertIn("brand/splash.template.html", cfg_js)
-        self.assertIn('features = ["tls"]', cfg_js)
+        self.assertIn('features = ["native-tls"]', cfg_js)
         self.assertIn('zip = "0.6"', cfg_js)
         cargo = (REPO_ROOT / "desktop" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
-        self.assertIn('features = ["tls"]', cargo)
+        self.assertIn('features = ["native-tls"]', cargo)
         self.assertIn('zip = "0.6"', cargo)
         rust = (REPO_ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
         self.assertIn('.env("OLLAMA_MODEL"', rust)

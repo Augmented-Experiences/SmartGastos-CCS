@@ -2605,15 +2605,32 @@ async function renderDashboard() {
   // Generar readiness banner
   const rd = state.readiness || {};
   let bannerClass = 'loading', bannerDot = 'blue', bannerText = 'Verificando sistema...';
-  if (rd.ready) { bannerClass = 'ready'; bannerDot = 'green'; bannerText = `Sistema listo — ${rd.models_count} modelo(s) disponible(s) • ${rd.default_model}`; }
+  if (rd.status === 'blocked') { bannerClass = 'error'; bannerDot = 'red'; bannerText = rd.message || 'Este equipo no cumple el mínimo de 8 GB de RAM.'; }
+  else if (rd.ready) { bannerClass = 'ready'; bannerDot = 'green'; bannerText = `Sistema listo — ${rd.models_count} modelo(s) disponible(s) • ${rd.default_model}`; }
   else if (rd.status === 'ollama_offline') { bannerClass = 'error'; bannerDot = 'red'; bannerText = 'Ollama no está ejecutándose. Reinicia el plugin.'; }
   else if (rd.status === 'model_missing') { bannerClass = 'warning'; bannerDot = 'yellow'; bannerText = `Modelo '${rd.default_model}' no encontrado. Descargando automáticamente...`; }
+
+  const access = rd.access || {};
+  const ramGb = access.ram_gb != null ? Number(access.ram_gb).toFixed(1) : '';
+  const ramWarn = access.level === 'warn'
+    ? `<div class="readiness-banner warning" style="margin-top:10px">
+        Este equipo tiene ${escHtml(ramGb)} GB de RAM (perfil Estándar). SmartGastos usa un modelo compacto y RapidOCR. Cierra otras aplicaciones mientras clasificas; los PDF grandes tardan más.
+      </div>`
+    : '';
+  const ramBlock = access.level === 'block'
+    ? `<div class="card" style="margin-top:16px;padding:20px;border:1px solid #dc2626">
+        <div style="font-weight:700;margin-bottom:8px">Este equipo no cumple el mínimo</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.5">Se midieron ${escHtml(ramGb)} GB de RAM y se necesitan al menos 8 GB. Cierra la aplicación.</div>
+      </div>`
+    : '';
 
   document.getElementById('mainContent').innerHTML = `
     <div class="readiness-banner ${bannerClass}" id="readinessBanner">
       <div class="readiness-dot ${bannerDot}"></div>
       <span>${bannerText}</span>
     </div>
+    ${ramWarn}
+    ${ramBlock}
     <div class="kpi-grid" id="kpiGrid">
       ${[1,2,3,4].map(() => `
         <div class="kpi-card">
@@ -5033,7 +5050,7 @@ function renderAgentesGrid() {
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
         <span style="font-size:10px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:20px">
-          \ud83d\udda5 ${a.modelo === 'tesseract' ? 'OCR Tesseract' : 'Motor IA local'}
+          \ud83d\udda5 ${a.modelo === 'rapidocr' || a.modelo === 'tesseract' || a.tipo === 'ocr' ? 'OCR RapidOCR' : (a.modelo === 'perfil' ? 'Modelo del perfil' : 'Motor IA local')}
         </span>
         <span style="font-size:10px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:20px">
           ${CONTEXTO_LABELS[a.contexto] || a.contexto || 'N/A'}
@@ -5071,18 +5088,31 @@ const AGENT_PARAM_HELP = {
   },
 };
 
-function agentModelOptionsHtml(current, isOcr) {
-  const installed = [...new Set([current, ...(state.ollamaModels || [])].filter(Boolean))];
+function agentProfileModelLabel() {
+  const p = (state.hardwarePerf && state.hardwarePerf.profile) || (state.readiness && state.readiness.profile) || {};
+  return p.model || (state.readiness && state.readiness.default_model) || 'llama3.2:3b';
+}
+
+function agentVisionAvailable() {
+  const p = (state.hardwarePerf && state.hardwarePerf.profile) || (state.readiness && state.readiness.profile) || {};
+  const extras = p.extra_models || p.extraModels || [];
+  return extras.some((m) => String(m).toLowerCase().includes('moondream'));
+}
+
+function agentModelOptionsHtml(current, agent) {
+  const isOcr = agent && (agent.tipo === 'ocr' || agent.id === 'ocr');
+  const isVision = agent && (agent.tipo === 'vision' || agent.id === 'vision');
   if (isOcr) {
-    return `<option value="${escHtml(current || 'tesseract')}" selected>${escHtml(current || 'tesseract')}</option>`;
+    return `<option value="rapidocr" selected>RapidOCR</option>`;
   }
-  const opts = installed.map(m =>
-    `<option value="${escHtml(m)}" ${m === current ? 'selected' : ''}>${escHtml(m)}</option>`
-  );
-  if (current && !installed.includes(current)) {
-    opts.unshift(`<option value="${escHtml(current)}" selected>${escHtml(current)}</option>`);
+  if (isVision) {
+    if (agentVisionAvailable()) {
+      return `<option value="moondream" selected>moondream (perfil Completo/Máximo)</option>`;
+    }
+    return `<option value="" selected>No disponible en este perfil</option>`;
   }
-  return opts.join('') || `<option value="${escHtml(current || '')}" selected>${escHtml(current || 'Sin modelos detectados')}</option>`;
+  const profileModel = agentProfileModelLabel();
+  return `<option value="perfil" selected>Modelo del perfil (${escHtml(profileModel)})</option>`;
 }
 
 function openAgentModal(agentId) {
@@ -5100,12 +5130,12 @@ function openAgentModal(agentId) {
     </div>
     <div style="margin-bottom:18px">
       <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Modelo</label>
-      <select class="form-select" id="agentModel" style="margin-top:6px" ${isOcr ? 'disabled' : ''}>
-        ${agentModelOptionsHtml(agent.modelo || '', isOcr)}
+      <select class="form-select" id="agentModel" style="margin-top:6px" disabled>
+        ${agentModelOptionsHtml(agent.modelo || '', agent)}
       </select>
       ${isOcr
-        ? '<div class="agent-param-help">Este agente lee el documento con OCR local. No usa un modelo de lenguaje.</div>'
-        : '<div class="agent-param-help">Elige un modelo ya descargado en Ollama. La lista sale de los modelos disponibles en este equipo.</div>'}
+        ? '<div class="agent-param-help">Este agente lee el documento con RapidOCR. No usa un modelo de lenguaje.</div>'
+        : '<div class="agent-param-help">El modelo de texto lo elige el perfil de RAM de este equipo. Cada agente cambia el prompt, no el modelo.</div>'}
     </div>
     <div style="margin-bottom:18px">
       <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Contexto de memoria</label>
@@ -5126,7 +5156,7 @@ function openAgentModal(agentId) {
       <textarea class="form-input" id="agentPrompt" rows="6" style="margin-top:6px;font-family:monospace;font-size:11px;resize:vertical">${escHtml(agent.prompt || '')}</textarea>
     </div>` : `
     <div style="padding:12px;background:var(--bg3);border-radius:6px;font-size:12px;color:var(--text3);margin-bottom:16px">
-      El OCR usa RapidOCR/Tesseract con preprocesamiento. No usa un modelo de lenguaje.
+      El OCR usa RapidOCR. No usa un modelo de lenguaje.
     </div>`}
     <div style="margin-bottom:8px">
       <label style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Parámetros de ejecución</label>
@@ -5596,7 +5626,7 @@ const TOUR_STEPS = [
   },
   {
     title: 'Agentes IA',
-    body: 'Cada tarjeta abre la configuración del agente. El modelo se elige en un listado y cada parámetro (tiempo máximo, creatividad, largo de respuesta) trae una explicación.',
+    body: 'Cada tarjeta abre la configuración del agente. El modelo de texto es el del perfil de RAM; aquí se editan el prompt y los tiempos de espera.',
     section: 'agentes',
   },
   {

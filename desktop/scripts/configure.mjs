@@ -191,11 +191,16 @@ const tiers = ((cfg.ollama && cfg.ollama.tiers) || [{ maxRamGb: 0, model: "llama
   })
 );
 const extraModels = ((cfg.ollama && cfg.ollama.extraModels) || []).map(String);
+const accessCfg = cfg.access || {};
 const appConfig = {
   productName,
   dataDirName,
   ollamaTiers: tiers,
   extraModels,
+  access: {
+    blockBelowGb: Number(accessCfg.blockBelowGb) || 7,
+    warnBelowGb: Number(accessCfg.warnBelowGb) || 13,
+  },
 };
 writeFileSync(
   resolve(DESKTOP, "src-tauri/appconfig.json"),

@@ -215,7 +215,7 @@ def check_ollama() -> bool:
 
 def _attach_profile(result: Dict, data_dir: Path) -> Dict:
     try:
-        from hardware_profile import load_active_profile, select_profile, describe_profile
+        from hardware_profile import load_active_profile, select_profile, describe_profile, access_for_ram
         hw = result.get("hardware") or {}
         profile = load_active_profile(str(data_dir)) or select_profile(hw.get("ram_gb") or 0)
         result["profile"] = {
@@ -226,6 +226,7 @@ def _attach_profile(result: Dict, data_dir: Path) -> Dict:
             "ram_gb": hw.get("ram_gb"),
             "summary": describe_profile(profile, hw.get("ram_gb")),
         }
+        result["access"] = access_for_ram(hw.get("ram_gb") or 0)
     except Exception as e:
         logger.debug("No se pudo adjuntar perfil de RAM: %s", e)
     return result
@@ -290,7 +291,7 @@ def get_readiness(data_dir: Path) -> Dict:
     ollama_ok = check_ollama()
     models = get_available_models() if ollama_ok else []
 
-    from hardware_profile import load_active_profile, select_profile, describe_profile
+    from hardware_profile import load_active_profile, select_profile, describe_profile, access_for_ram
     from ollama_client import _launcher_model
 
     hw = detect_hardware()
@@ -319,6 +320,15 @@ def get_readiness(data_dir: Path) -> Dict:
         message = "Preparando el sistema..."
         status = "preparing"
 
+    access = access_for_ram(hw.get("ram_gb") or 0)
+    if access.get("level") == "block":
+        ready = False
+        status = "blocked"
+        message = (
+            f"Este equipo no cumple el mínimo. Se midieron {float(access.get('ram_gb') or 0):.1f} GB "
+            "de RAM y se necesitan al menos 8 GB."
+        )
+
     return {
         "ready": ready,
         "status": status,
@@ -328,6 +338,7 @@ def get_readiness(data_dir: Path) -> Dict:
         "available_models": models,
         "models_count": len(models),
         "message": message,
+        "access": access,
         "profile": {
             "id": profile.get("id"),
             "label": profile.get("label"),
