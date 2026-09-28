@@ -295,6 +295,20 @@ class TestUIFiles(unittest.TestCase):
         self.assertEqual(access.get("blockBelowGb"), 7)
         self.assertEqual(access.get("warnBelowGb"), 13)
 
+    def test_feedback_v2_tour_nav_and_new_company_flow(self):
+        index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
+        i_asist = index.find('data-s="asistente-inicial"')
+        i_agentes = index.find('data-s="agentes"')
+        i_admin = index.find('data-s="admin"')
+        self.assertGreater(i_asist, 0)
+        self.assertLess(i_asist, i_agentes)
+        self.assertLess(i_agentes, i_admin)
+        self.assertIn("section: 'dashboard'", index)
+        self.assertIn("showSection(step.section || 'dashboard')", index)
+        self.assertIn("padding-right: 40px", index)
+        self.assertIn("onclick=\"showOnboarding(true)\">+ Nueva</button>", index)
+        self.assertNotIn("onclick=\"openModal('empresaModal')\">+ Nueva</button>", index)
+
     def test_ui_uses_ccs_png_wordmark_and_favicon(self):
         index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="favicon.ico"', index)
