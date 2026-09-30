@@ -27,7 +27,7 @@ import re as _re_mod
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, FileResponse, StreamingResponse, Response
@@ -784,6 +784,7 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
 @app.get("/api/empresas/{empresa_id}/documentos/process-stream")
 async def process_document_stream(
     empresa_id: str,
+    request: Request,
     file_name: str = None,
     file_path: str = None,
     original_filename: str = "documento"
@@ -819,9 +820,11 @@ async def process_document_stream(
 
         agent = DocumentPipelineAgent(db, empresa_id, UPLOADS_DIR)
 
-        def generate():
+        async def generate():
             try:
                 for event in agent.process_stream(str(fp), original_filename):
+                    if await request.is_disconnected():
+                        break
                     yield event
             except Exception as e:
                 import json as _json

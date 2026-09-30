@@ -309,6 +309,19 @@ class TestUIFiles(unittest.TestCase):
         self.assertIn("onclick=\"showOnboarding(true)\">+ Nueva</button>", index)
         self.assertNotIn("onclick=\"openModal('empresaModal')\">+ Nueva</button>", index)
 
+    def test_feedback_v3_company_dropdown_and_cancel_upload(self):
+        index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="topbarEmpresa"', index)
+        self.assertIn("function onTopbarEmpresaChange", index)
+        self.assertIn("function cancelUpload", index)
+        self.assertIn("function stopPipelineStream", index)
+        self.assertIn('onclick="cancelUpload()"', index)
+        self.assertIn("Cancelar subida", index)
+        self.assertIn("Quitar archivo", index)
+        self.assertIn("emp-chevron", index)
+        app_py = (REPO_ROOT / "server" / "app.py").read_text(encoding="utf-8")
+        self.assertIn("request.is_disconnected()", app_py)
+
     def test_ui_uses_ccs_png_wordmark_and_favicon(self):
         index = (REPO_ROOT / "app" / "index.html").read_text(encoding="utf-8")
         self.assertIn('href="favicon.ico"', index)

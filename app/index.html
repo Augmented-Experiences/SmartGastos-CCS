@@ -205,6 +205,19 @@ a:hover { text-decoration: underline; }
   position: relative;
 }
 .sidebar-emp:hover { background: var(--bg3); }
+.emp-row { display: flex; align-items: center; gap: 8px; }
+.emp-chevron {
+  width: 8px; height: 8px; flex-shrink: 0;
+  border-right: 2px solid var(--text2);
+  border-bottom: 2px solid var(--text2);
+  transform: rotate(45deg);
+  margin-top: -3px;
+  transition: transform .15s;
+}
+.sidebar-emp.open .emp-chevron {
+  transform: rotate(-135deg);
+  margin-top: 3px;
+}
 .emp-switcher {
   display: none;
   position: absolute;
@@ -310,9 +323,35 @@ a:hover { text-decoration: underline; }
   top: 0;
   z-index: 50;
 }
-.topbar-info { flex: 1; }
+.topbar-info { flex: 1; min-width: 0; }
 .topbar-title { font-size: 17px; font-weight: 700; color: var(--ccs-azul-oscuro); letter-spacing: -0.01em; }
 .topbar-sub { font-size: 10px; color: var(--text2); margin-top: 1px; }
+.topbar-emp {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 168px;
+  max-width: 240px;
+  flex-shrink: 0;
+}
+.topbar-emp > span {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text2);
+}
+.topbar-emp-select {
+  width: 100%;
+  min-height: 32px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 36px 6px 10px;
+  background-color: var(--bg3);
+  border: 1.5px solid var(--ccs-azul);
+  border-radius: 8px;
+  color: var(--text);
+}
 .content { flex: 1; overflow-y: auto; padding: 24px; }
 
 /* ── Buttons ────────────────────────────────────────────────── */
@@ -434,7 +473,7 @@ a:hover { text-decoration: underline; }
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
   background: linear-gradient(135deg, rgba(13,61,166,.06), rgba(13,86,202,.02));
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .ph-icon { font-size: 24px; }
 .ph-info { flex: 1; }
@@ -1598,10 +1637,15 @@ a:hover { text-decoration: underline; }
         <div class="logo-sub">Gestión de gastos · CCS</div>
       </div>
     </div>
-    <div class="sidebar-emp" id="sidebarEmp" onclick="toggleEmpSwitcher(event)">
+    <div class="sidebar-emp" id="sidebarEmp" onclick="toggleEmpSwitcher(event)" title="Cambiar empresa activa">
       <div class="emp-label">Empresa activa</div>
-      <div class="emp-name" id="sidebarEmpName">Sin empresa</div>
-      <div class="emp-rut" id="sidebarEmpRut">—</div>
+      <div class="emp-row">
+        <div style="flex:1;min-width:0">
+          <div class="emp-name" id="sidebarEmpName">Sin empresa</div>
+          <div class="emp-rut" id="sidebarEmpRut">—</div>
+        </div>
+        <span class="emp-chevron" aria-hidden="true"></span>
+      </div>
       <div class="emp-switcher" id="empSwitcher" onclick="event.stopPropagation()"></div>
     </div>
     <div class="sidebar-nav">
@@ -1652,6 +1696,10 @@ a:hover { text-decoration: underline; }
         <div class="topbar-title" id="topbarTitle">Dashboard</div>
         <div class="topbar-sub" id="topbarSub">Resumen de actividad</div>
       </div>
+      <label class="topbar-emp" title="Cambiar empresa activa">
+        <span>Empresa</span>
+        <select id="topbarEmpresa" class="topbar-emp-select" onchange="onTopbarEmpresaChange(this.value)"></select>
+      </label>
       <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
         <button class="btn btn-ghost btn-sm" onclick="startProductTour(true)" title="Guía de uso">📖 Guía</button>
         <button class="btn btn-secondary btn-sm" onclick="showSection('nuevo-gasto')">➕ Nuevo Gasto</button>
@@ -2051,13 +2099,35 @@ async function checkOllamaStatus() { return checkReadiness(); }
 
 function updateSidebarEmpresa() {
   if (state.empresa) {
-    document.getElementById('sidebarEmpName').textContent = state.empresa.razon_social;
-    document.getElementById('sidebarEmpRut').textContent = displayRut(state.empresa.rut);
+    const nameEl = document.getElementById('sidebarEmpName');
+    const rutEl = document.getElementById('sidebarEmpRut');
+    if (nameEl) nameEl.textContent = state.empresa.razon_social;
+    if (rutEl) rutEl.textContent = displayRut(state.empresa.rut);
   }
   renderEmpSwitcher();
 }
 
+function fillTopbarEmpresa() {
+  const sel = document.getElementById('topbarEmpresa');
+  if (!sel) return;
+  const list = state.empresas || [];
+  if (!list.length) {
+    sel.innerHTML = '<option value="">Sin empresa</option>';
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  sel.innerHTML = list.map(e =>
+    `<option value="${escHtml(e.id)}" ${state.empresa?.id === e.id ? 'selected' : ''}>${escHtml(e.razon_social)}</option>`
+  ).join('');
+}
+
+function onTopbarEmpresaChange(id) {
+  if (id && id !== state.empresa?.id) selectEmpresa(id);
+}
+
 function renderEmpSwitcher() {
+  fillTopbarEmpresa();
   const box = document.getElementById('empSwitcher');
   if (!box) return;
   const rows = (state.empresas || []).map(e => `
@@ -2076,14 +2146,19 @@ function renderEmpSwitcher() {
 function toggleEmpSwitcher(ev) {
   if (ev) ev.stopPropagation();
   const box = document.getElementById('empSwitcher');
+  const card = document.getElementById('sidebarEmp');
   if (!box) return;
-  box.classList.toggle('open');
+  const open = !box.classList.contains('open');
+  box.classList.toggle('open', open);
+  if (card) card.classList.toggle('open', open);
   renderEmpSwitcher();
 }
 
 document.addEventListener('click', () => {
   const box = document.getElementById('empSwitcher');
+  const card = document.getElementById('sidebarEmp');
   if (box) box.classList.remove('open');
+  if (card) card.classList.remove('open');
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -2558,7 +2633,7 @@ async function setupChatSend() {
     return;
   }
   if (lower.includes('cambiar')) {
-    obAddMsg('Elige la empresa activa desde el recuadro de la izquierda o en Administración.', 'bot');
+    obAddMsg('Elige la empresa activa en el menú Empresa de la barra superior, en el recuadro de la izquierda o en Administración.', 'bot');
     toggleEmpSwitcher();
     return;
   }
@@ -2878,6 +2953,7 @@ async function renderNuevoGasto() {
               <button type="button" class="btn btn-secondary btn-sm" onclick="zoomDoc(1.25)" title="Acercar">+</button>
               <button type="button" class="btn btn-secondary btn-sm" onclick="zoomDoc(0)">Ajustar</button>
               <button type="button" class="btn btn-secondary btn-sm" id="btnRegion" onclick="toggleRegionSelect()">Seleccionar zona</button>
+              <button type="button" class="btn btn-secondary btn-sm" id="btnQuitarArchivo" onclick="cancelUpload()">Quitar archivo</button>
             </div>
             <div class="doc-zoom-stage" id="docZoomStage">
               <img id="docZoomImg" alt="Documento subido" draggable="false" />
@@ -2937,6 +3013,7 @@ async function renderNuevoGasto() {
               <div class="ph-file" id="pipelineFile">—</div>
             </div>
             <div class="ph-status" id="pipelineStatus">Iniciando...</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnCancelUpload" onclick="cancelUpload()">Cancelar subida</button>
           </div>
           <div class="pipeline-steps" id="pipelineSteps"></div>
         </div>
@@ -2981,6 +3058,10 @@ function initPipelineUI(filename) {
   document.getElementById('pipelineStatus').textContent = 'Procesando...';
   document.getElementById('pipelineStatus').className = 'ph-status';
   document.getElementById('resultWrap').style.display = 'none';
+  const btnCancel = document.getElementById('btnCancelUpload');
+  if (btnCancel) btnCancel.style.display = '';
+  const btnQuitar = document.getElementById('btnQuitarArchivo');
+  if (btnQuitar) btnQuitar.style.display = '';
 
   const stepsEl = document.getElementById('pipelineSteps');
   stepsEl.innerHTML = STEPS.map((s, i) => `
@@ -3965,6 +4046,29 @@ async function validateAndAcceptDocument() {
 }
 
 let _lastFileSig = '';
+let _pipelineEs = null;
+let _uploadAbort = null;
+let _uploadCancelled = false;
+
+function stopPipelineStream() {
+  _uploadCancelled = true;
+  if (_pipelineEs) {
+    try { _pipelineEs.close(); } catch (e) {}
+    _pipelineEs = null;
+  }
+  if (_uploadAbort) {
+    try { _uploadAbort.abort(); } catch (e) {}
+    _uploadAbort = null;
+  }
+}
+
+function cancelUpload() {
+  stopPipelineStream();
+  _lastFileSig = '';
+  resetUpload();
+  showToast('Subida cancelada. Puedes elegir otro archivo.', 'info');
+}
+
 async function processFile(file) {
   if (!file) return;
   const sig = `${file.name}:${file.size}:${file.lastModified}`;
@@ -3972,6 +4076,9 @@ async function processFile(file) {
   _lastFileSig = sig;
   setTimeout(() => { if (_lastFileSig === sig) _lastFileSig = ''; }, 1500);
   if (!state.empresa) { showToast('Selecciona una empresa primero', 'error'); return; }
+  stopPipelineStream();
+  _uploadCancelled = false;
+  _uploadAbort = new AbortController();
   showUploadPreview(file);
   initPipelineUI(file.name);
 
@@ -3988,15 +4095,23 @@ async function processFile(file) {
     const r = await fetch(`${API}/api/empresas/${state.empresa.id}/documentos/upload`, {
       method: 'POST',
       body: formData,
+      signal: _uploadAbort.signal,
     });
+    if (_uploadCancelled) return;
     if (!r.ok) throw new Error(await r.text());
     uploadData = await r.json();
   } catch(e) {
+    if (e.name === 'AbortError' || _uploadCancelled) return;
     showToast('Error subiendo archivo: ' + e.message, 'error');
-    document.getElementById('pipelineStatus').textContent = 'Error al subir';
-    document.getElementById('pipelineStatus').className = 'ph-status error';
+    const st = document.getElementById('pipelineStatus');
+    if (st) {
+      st.textContent = 'Error al subir';
+      st.className = 'ph-status error';
+    }
     return;
   }
+
+  if (_uploadCancelled) return;
 
   // SSE stream — usar file_name para evitar problemas de rutas cross-platform
   const params = new URLSearchParams({
@@ -4006,9 +4121,11 @@ async function processFile(file) {
   const evtSource = new EventSource(
     `${API}/api/empresas/${state.empresa.id}/documentos/process-stream?${params}`
   );
+  _pipelineEs = evtSource;
   let finalData = null;
 
   evtSource.onmessage = (event) => {
+    if (_uploadCancelled) { evtSource.close(); return; }
     try {
       const data = JSON.parse(event.data);
 
@@ -4016,8 +4133,13 @@ async function processFile(file) {
         finalData = data;
         state.processingDoc = data;
         evtSource.close();
+        _pipelineEs = null;
         document.getElementById('pipelineStatus').textContent = '✅ Completado';
         document.getElementById('pipelineStatus').className = 'ph-status done';
+        const btnCancel = document.getElementById('btnCancelUpload');
+        if (btnCancel) btnCancel.style.display = 'none';
+        const btnQuitar = document.getElementById('btnQuitarArchivo');
+        if (btnQuitar) btnQuitar.style.display = 'none';
         renderResultPanel(data);
         showToast('Documento procesado exitosamente', 'success');
         return;
@@ -4025,6 +4147,7 @@ async function processFile(file) {
 
       if (data.step === 'error') {
         evtSource.close();
+        _pipelineEs = null;
         document.getElementById('pipelineStatus').textContent = '❌ Error';
         document.getElementById('pipelineStatus').className = 'ph-status error';
         showToast(data.message || 'Error en el pipeline', 'error');
@@ -4043,8 +4166,10 @@ async function processFile(file) {
   };
 
   evtSource.onerror = () => {
+    if (_uploadCancelled) { evtSource.close(); return; }
     if (!finalData) {
       evtSource.close();
+      _pipelineEs = null;
       showToast('Error de conexión con el pipeline', 'error');
     }
   };
@@ -4054,6 +4179,7 @@ async function processFile(file) {
 // que incluye validación completa de todos los campos antes de guardar.
 
 function resetUpload() {
+  stopPipelineStream();
   state.processingDoc = null;
   state.pendingUploadFile = null;
   state.pendingUploadName = '';
@@ -4075,10 +4201,16 @@ function resetUpload() {
   if (rect) rect.style.display = 'none';
   regionSelect.active = false;
   regionSelect.norm = null;
-  document.getElementById('pipelineWrap').style.display = 'none';
-  document.getElementById('resultWrap').style.display = 'none';
+  const pw = document.getElementById('pipelineWrap');
+  if (pw) pw.style.display = 'none';
+  const rw = document.getElementById('resultWrap');
+  if (rw) rw.style.display = 'none';
   const fi = document.getElementById('fileInput');
   if (fi) fi.value = '';
+  const btnCancel = document.getElementById('btnCancelUpload');
+  if (btnCancel) btnCancel.style.display = '';
+  const btnQuitar = document.getElementById('btnQuitarArchivo');
+  if (btnQuitar) btnQuitar.style.display = '';
 }
 
 function onDragOver(e) {
@@ -5306,13 +5438,26 @@ async function renderAdmin() {
 }
 
 async function selectEmpresa(id) {
+  if (!id) return;
+  if (state.empresa?.id === id) {
+    const sw = document.getElementById('empSwitcher');
+    const card = document.getElementById('sidebarEmp');
+    if (sw) sw.classList.remove('open');
+    if (card) card.classList.remove('open');
+    return;
+  }
+  stopPipelineStream();
+  resetUpload();
   state.empresa = state.empresas.find(e => e.id === id);
   persistEmpresa();
   updateSidebarEmpresa();
   await loadCategorias();
   const sw = document.getElementById('empSwitcher');
+  const card = document.getElementById('sidebarEmp');
   if (sw) sw.classList.remove('open');
-  if (state.currentSection === 'admin') renderAdmin();
+  if (card) card.classList.remove('open');
+  const stay = state.currentSection;
+  if (stay && stay !== 'asistente-inicial') showSection(stay);
   showToast(`Empresa activa: ${state.empresa.razon_social}`, 'info');
 }
 
@@ -5623,12 +5768,12 @@ function safeHtml(html) {
 const TOUR_STEPS = [
   {
     title: 'Empresa activa',
-    body: 'Aquí ves la empresa con la que estás trabajando. Haz clic para cambiar, crear o administrar otras empresas en la misma aplicación.',
+    body: 'Cambia de empresa con el menú Empresa de la barra superior, o haz clic en la tarjeta de la izquierda. Ahí también puedes crear o administrar otras empresas.',
     section: 'dashboard',
   },
   {
     title: 'Nuevo gasto',
-    body: 'Arrastra un PDF o una foto de la boleta, o usa Seleccionar archivo. El pipeline lee el texto, propone los campos y sugiere una categoría. Tú la confirmas o la cambias antes de guardar.',
+    body: 'Arrastra un PDF o una foto de la boleta, o usa Seleccionar archivo. Si te equivocas de archivo, cancela la subida y elige otro. El pipeline lee el texto, propone los campos y sugiere una categoría. Tú la confirmas o la cambias antes de guardar.',
     section: 'nuevo-gasto',
   },
   {
