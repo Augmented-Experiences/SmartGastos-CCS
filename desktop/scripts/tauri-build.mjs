@@ -55,10 +55,18 @@ function runProcess(label, cmd, args, cwd, logPath) {
   });
 }
 
+const extraArgs = process.argv.slice(2).filter((a) => a && a !== "--");
+const tauriArgs = [TAURI_CLI, "build", "--verbose", ...extraArgs];
+const targetIdx = extraArgs.indexOf("--target");
+const cargoArgs = ["build", "--release", "-vv"];
+if (targetIdx >= 0 && extraArgs[targetIdx + 1]) {
+  cargoArgs.push("--target", extraArgs[targetIdx + 1]);
+}
+
 const code = await runProcess(
-  "tauri build --verbose",
+  ["tauri", "build", "--verbose", ...extraArgs].join(" "),
   process.execPath,
-  [TAURI_CLI, "build", "--verbose", "--verbose"],
+  tauriArgs,
   DESKTOP,
   LOG_PATH
 );
@@ -72,9 +80,9 @@ process.stderr.write(
 );
 
 const cargoCode = await runProcess(
-  "cargo build --release -vv",
+  ["cargo", ...cargoArgs].join(" "),
   "cargo",
-  ["build", "--release", "-vv"],
+  cargoArgs,
   resolve(DESKTOP, "src-tauri"),
   CARGO_LOG_PATH
 );

@@ -70,6 +70,10 @@ TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
 mkdir -p desktop/src-tauri/binaries
 cp "desktop/backend/dist/backend" "desktop/src-tauri/binaries/backend-${TRIPLE}"
 chmod +x "desktop/src-tauri/binaries/backend-${TRIPLE}"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  codesign --force --sign - "desktop/src-tauri/binaries/backend-${TRIPLE}"
+  echo "==> Sidecar firmado ad-hoc (codesign -s -)"
+fi
 echo "==> Sidecar listo: desktop/src-tauri/binaries/backend-${TRIPLE}"
 echo ""
 if [[ "$INSTALLER" == "1" ]]; then
