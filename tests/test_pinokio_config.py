@@ -520,5 +520,46 @@ class TestSplashSingleWhiteLogo(unittest.TestCase):
         )
 
 
+class TestMacosDeveloperIdInstaller(unittest.TestCase):
+    """El DMG de Mac se firma y notariza con el Developer ID de Augmented Experiences."""
+
+    def setUp(self):
+        self.workflow = (REPO_ROOT / ".github" / "workflows" / "macos-installer.yml").read_text(
+            encoding="utf-8"
+        )
+        self.backend = (REPO_ROOT / "desktop" / "scripts" / "build-backend.sh").read_text(
+            encoding="utf-8"
+        )
+
+    def test_workflow_uses_org_apple_secrets_and_oswaldo_runners(self):
+        for name in (
+            "APPLE_CERTIFICATE",
+            "APPLE_CERTIFICATE_PASSWORD",
+            "APPLE_SIGNING_IDENTITY",
+            "APPLE_ID",
+            "APPLE_PASSWORD",
+            "APPLE_TEAM_ID",
+        ):
+            self.assertIn(f"secrets.{name}", self.workflow)
+        self.assertNotIn("APPLE_DEVELOPER_ID", self.workflow)
+        self.assertIn("macos-15", self.workflow)
+        self.assertIn("macos-15-intel", self.workflow)
+        self.assertIn("build-backend.sh --installer", self.workflow)
+
+    def test_empty_certificate_unsets_apple_env(self):
+        self.assertIn('if [ -z "${APPLE_CERTIFICATE}" ]', self.workflow)
+        self.assertIn("unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID", self.workflow)
+
+    def test_sidecar_gets_developer_id_not_adhoc_when_cert_present(self):
+        self.assertIn("sign_bundled_sidecar", self.backend)
+        self.assertIn("--options runtime", self.backend)
+        self.assertIn("--timestamp", self.backend)
+        self.assertIn('APPLE_SIGNING_IDENTITY', self.backend)
+        self.assertIn(
+            'if [[ "$(uname -s)" == "Darwin" && -z "${APPLE_CERTIFICATE:-}" ]]',
+            self.backend,
+        )
+
+
 if __name__ == '__main__':
     unittest.main()
