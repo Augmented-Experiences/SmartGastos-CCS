@@ -1,59 +1,52 @@
-name: Build SmartGastos Desktop Installers
+name: Instalador macOS
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 jobs:
-  build:
+  dmg:
+    name: DMG (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
+          - os: macos-15
+            label: apple-silicon
+          - os: macos-15-intel
+            label: intel
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Empaquetar sidecar e instalador
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_CERTIFICATE}" ]; then
+            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY
+            echo "Sin certificado de Developer ID: el DMG queda sin firmar."
+          fi
+          bash desktop/scripts/build-backend.sh --installer
+
+      - uses: actions/upload-artifact@v4
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Build backend sidecar
-        run: bash desktop/scripts/build-backend.sh
-
-      - name: Install desktop npm deps
-        working-directory: desktop
-        run: npm install
-
-      - name: Generate Tauri icons
-        working-directory: desktop
-        run: npm run icon
-
-      - name: Build Tauri app
-        working-directory: desktop
-        run: npm run build -- --target ${{ matrix.target }}
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: smartgastos-${{ matrix.target }}
-          path: |
-            desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
-            desktop/src-tauri/target/release/bundle/**/*.dmg
+          name: SmartGastos-macos-${{ matrix.label }}
+          path: desktop/src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
           retention-days: 14

@@ -524,8 +524,14 @@ class TestMacosDeveloperIdInstaller(unittest.TestCase):
     """El DMG de Mac se firma y notariza con el Developer ID de Augmented Experiences."""
 
     def setUp(self):
-        self.workflow = (REPO_ROOT / ".github" / "workflows" / "macos-installer.yml").read_text(
+        self.workflow = (REPO_ROOT / ".github" / "workflows" / "desktop-build.yml").read_text(
             encoding="utf-8"
+        )
+        named = REPO_ROOT / ".github" / "workflows" / "macos-installer.yml"
+        self.assertTrue(named.is_file(), "falta macos-installer.yml (mismo contrato que OsWaldo)")
+        self.assertEqual(
+            self.workflow.replace("\r\n", "\n"),
+            named.read_text(encoding="utf-8").replace("\r\n", "\n"),
         )
         self.backend = (REPO_ROOT / "desktop" / "scripts" / "build-backend.sh").read_text(
             encoding="utf-8"
