@@ -18,6 +18,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
 
@@ -153,13 +154,194 @@ def sanitize_dict_fields(data: dict) -> dict:
 # Validación de paths (anti path-traversal)
 # ============================================================
 
-def validate_path_within(file_path: Path, base_dir: Path) -> bool:
-    """Verifica que un path resuelto esté dentro del directorio base."""
+# Comprobantes: JPEG/PNG/WEBP y también BMP/TIFF porque ALLOWED_EXTENSIONS
+# ya los acepta en el upload. Pillow identifica el formato por el contenido.
+RECEIPT_IMAGE_FORMATS = ("JPEG", "PNG", "WEBP", "BMP", "TIFF")
+# ~40 megapíxeles: cubre foto de celular y un A4 a 600 dpi, y corta bombas de descompresión.
+MAX_RECEIPT_PIXELS = 40_000_000
+MAX_PDF_PAGES = 20
+
+_EXT_KIND = {
+    ".pdf": "pdf",
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".png": "png",
+    ".webp": "webp",
+    ".bmp": "bmp",
+    ".tif": "tiff",
+    ".tiff": "tiff",
+}
+
+
+class ReceiptImageRejected(ValueError):
+    """La imagen no es un comprobante permitido o es demasiado grande."""
+
+
+class PdfRejected(ValueError):
+    """El PDF está dañado o supera el límite de páginas."""
+
+
+def sanitize_log(value: Any, limit: int = 180) -> str:
+    """Quita CR/LF y otros controles antes de escribir input de usuario en un log."""
+    text = "" if value is None else str(value)
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
+    text = " ".join(text.split())
+    if len(text) > limit:
+        return text[:limit] + "…"
+    return text
+
+
+def log_safe_path(path: Any, *roots: Path) -> str:
+    """Ruta completa solo si cae dentro de un directorio de la app; si no, el nombre."""
     try:
-        file_path.resolve().relative_to(base_dir.resolve())
-        return True
-    except ValueError:
+        resolved = Path(str(path)).resolve(strict=False)
+    except (OSError, ValueError):
+        return sanitize_log(Path(str(path)).name)
+    for root in roots:
+        try:
+            resolved.relative_to(Path(root).resolve(strict=False))
+            return sanitize_log(str(resolved))
+        except (ValueError, OSError):
+            continue
+    return sanitize_log(resolved.name)
+
+
+def loopback_hostname(host_header: str, *, allow_testserver: bool = False) -> bool:
+    """Host permitido: localhost, 127.0.0.1 o ::1. testserver solo fuera del .exe."""
+    if not host_header:
         return False
+    host = str(host_header).strip().lower()
+    if host.startswith("["):
+        end = host.find("]")
+        hostname = host[1:end] if end > 1 else ""
+    elif host.count(":") == 1:
+        hostname = host.split(":", 1)[0]
+    else:
+        hostname = host
+    allowed = {"localhost", "127.0.0.1", "::1"}
+    if allow_testserver:
+        allowed.add("testserver")
+    return hostname in allowed
+
+
+def validate_path_within(file_path: Path, base_dir: Path) -> bool:
+    """Resuelve .., absolutas, %2e%2e (hasta dos veces) y symlinks. Rechaza lo que salga de base_dir."""
+    try:
+        raw = str(file_path)
+        if "\x00" in raw:
+            return False
+        decoded = unquote(unquote(raw))
+        if "\x00" in decoded:
+            return False
+        base = Path(base_dir).resolve(strict=False)
+        target = Path(decoded).resolve(strict=False)
+        target.relative_to(base)
+        return True
+    except (ValueError, OSError, RuntimeError):
+        return False
+
+
+def safe_join(base_dir: Path, untrusted_name: str) -> Optional[Path]:
+    """Une un nombre no confiable a base_dir y devuelve None si escapa."""
+    if untrusted_name is None:
+        return None
+    raw = str(untrusted_name)
+    if "\x00" in raw:
+        return None
+    decoded = unquote(unquote(raw)).replace("\\", "/")
+    if "\x00" in decoded:
+        return None
+    name = Path(decoded).name
+    if not name or name in {".", ".."}:
+        return None
+    candidate = Path(base_dir) / name
+    if not validate_path_within(candidate, base_dir):
+        return None
+    return candidate.resolve(strict=False)
+
+
+def detect_upload_kind(header: bytes) -> Optional[str]:
+    """Formato real por magic bytes. No usa la extensión ni el MIME declarado."""
+    if not header:
+        return None
+    if header.startswith(b"%PDF"):
+        return "pdf"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if header.startswith(b"BM"):
+        return "bmp"
+    if header.startswith(b"II*\x00") or header.startswith(b"MM\x00*"):
+        return "tiff"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "webp"
+    if header.startswith(b"8BPS"):
+        return "psd"
+    return None
+
+
+def extension_kind(suffix: str) -> Optional[str]:
+    return _EXT_KIND.get((suffix or "").lower())
+
+
+def open_receipt_image(path):
+    """Abre un comprobante solo si Pillow reconoce un formato de la lista."""
+    from PIL import Image, UnidentifiedImageError
+
+    Image.MAX_IMAGE_PIXELS = MAX_RECEIPT_PIXELS
+    if not hasattr(Image, "LANCZOS"):
+        Image.LANCZOS = Image.Resampling.LANCZOS
+    try:
+        img = Image.open(path, formats=list(RECEIPT_IMAGE_FORMATS))
+        img.load()
+        return img
+    except Image.DecompressionBombError as exc:
+        raise ReceiptImageRejected(
+            "La imagen es demasiado grande para un comprobante (máximo 40 megapíxeles)."
+        ) from exc
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ReceiptImageRejected(
+            "El archivo no es una imagen permitida (JPEG, PNG, WEBP, BMP o TIFF)."
+        ) from exc
+
+
+def inspect_pdf(path) -> int:
+    """Cuenta páginas antes de extraer texto. Un PDF dañado no propaga la excepción cruda."""
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(str(path))
+        count = len(reader.pages)
+    except PdfRejected:
+        raise
+    except Exception as exc:
+        raise PdfRejected("El PDF está dañado o no se puede leer.") from exc
+    if count < 1:
+        raise PdfRejected("El PDF no tiene páginas.")
+    if count > MAX_PDF_PAGES:
+        raise PdfRejected(
+            f"El PDF tiene {count} páginas. El máximo para un comprobante es {MAX_PDF_PAGES}."
+        )
+    return count
+
+
+def read_pdf_text(path) -> str:
+    """Texto digital del PDF, ya con límite de páginas."""
+    inspect_pdf(path)
+    import pypdf
+    reader = pypdf.PdfReader(str(path))
+    parts = []
+    for index, page in enumerate(reader.pages):
+        if index >= MAX_PDF_PAGES:
+            break
+        try:
+            text = page.extract_text() or ""
+        except Exception:
+            continue
+        if text.strip():
+            parts.append(text)
+    return "\n".join(parts)
 
 
 def sanitize_filename(name: str) -> str:

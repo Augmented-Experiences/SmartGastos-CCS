@@ -115,7 +115,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "pytest"] + list(_pyi.get("excludes", [])),
+    excludes=["tkinter", "matplotlib", "pytest", "verify_best_practices"] + list(_pyi.get("excludes", [])),
     noarchive=False,
 )
 

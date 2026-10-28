@@ -58,7 +58,10 @@ from security import (
     sanitize_user_input, detect_injection_attempt,
     fix_encoding, sanitize_llm_response, safe_display_value,
     sanitize_dict_fields, validate_path_within, sanitize_filename,
-    harden_system_prompt, estimate_savings, SECURITY_CLAUSE
+    harden_system_prompt, estimate_savings, SECURITY_CLAUSE,
+    safe_join, detect_upload_kind, extension_kind, open_receipt_image,
+    inspect_pdf, ReceiptImageRejected, PdfRejected, sanitize_log, log_safe_path,
+    loopback_hostname,
 )
 from hardware import (
     detect_hardware, get_hardware_performance,
@@ -135,10 +138,40 @@ if _pinokio_origin:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_origin_regex=r"http://(127\.0\.0\.1)(:\d+)?",  # Solo loopback
+    allow_origin_regex=r"http://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class LoopbackHostMiddleware:
+    """Rechaza Host que no sea loopback. Un sitio web no puede llamar al backend local."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        raw = ""
+        for key, value in scope.get("headers") or []:
+            if key == b"host":
+                raw = value.decode("latin1", errors="replace")
+                break
+        allow_test = not getattr(sys, "frozen", False)
+        if not loopback_hostname(raw, allow_testserver=allow_test):
+            from fastapi.responses import JSONResponse
+            response = JSONResponse(
+                status_code=403,
+                content={"detail": "Host no permitido."},
+            )
+            await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(LoopbackHostMiddleware)
 
 
 # Exception handler global: oculta stack traces internos del cliente
@@ -149,7 +182,12 @@ _app_logger = _logging.getLogger("pyme_ledger_ai")
 async def _global_exception_handler(request, exc):
     """Captura excepciones no manejadas y devuelve error genérico al cliente."""
     import traceback
-    _app_logger.error(f"Error no manejado en {request.url.path}: {exc}\n{traceback.format_exc()}")
+    _app_logger.error(
+        "Error no manejado en %s: %s | %s",
+        sanitize_log(request.url.path),
+        sanitize_log(exc, limit=300),
+        sanitize_log(traceback.format_exc(), limit=2000),
+    )
     from fastapi.responses import JSONResponse
     return JSONResponse(
         status_code=500,
@@ -741,28 +779,55 @@ async def upload_document(empresa_id: str, file: UploadFile = File(...)):
             file_path.unlink(missing_ok=True)
             raise HTTPException(status_code=400, detail="Archivo vac\u00edo")
 
-        # Validar MIME type real del archivo (no confiar solo en extensi\u00f3n)
-        ALLOWED_MIMES = {
-            'application/pdf', 'image/jpeg', 'image/png',
-            'image/bmp', 'image/tiff', 'image/webp',
-            'image/x-ms-bmp',  # Variante BMP en algunos sistemas
-        }
+        with open(str(file_path), "rb") as uploaded:
+            header = uploaded.read(16)
+        kind = detect_upload_kind(header)
+        expected = extension_kind(file_extension)
+        if not kind or kind == "psd" or kind != expected:
+            file_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail="El contenido del archivo no coincide con un comprobante permitido (PDF, JPEG, PNG, WEBP, BMP o TIFF).",
+            )
         try:
             import magic
             detected_mime = magic.from_file(str(file_path), mime=True)
         except (ImportError, Exception):
-            # Fallback a mimetypes si python-magic no está disponible
-            import mimetypes
-            detected_mime, _ = mimetypes.guess_type(str(file_path))
-        
-        if detected_mime and detected_mime not in ALLOWED_MIMES:
+            detected_mime = None
+        kind_mimes = {
+            "pdf": {"application/pdf"},
+            "jpeg": {"image/jpeg"},
+            "png": {"image/png"},
+            "bmp": {"image/bmp", "image/x-ms-bmp"},
+            "tiff": {"image/tiff"},
+            "webp": {"image/webp"},
+        }
+        if detected_mime and detected_mime not in kind_mimes.get(kind, set()):
             file_path.unlink(missing_ok=True)
             raise HTTPException(
                 status_code=400,
-                detail=f"Tipo de archivo no permitido: {detected_mime}"
+                detail=f"Tipo de archivo no permitido: {detected_mime}",
+            )
+        try:
+            if kind == "pdf":
+                inspect_pdf(file_path)
+            else:
+                img = open_receipt_image(file_path)
+                img.close()
+        except (ReceiptImageRejected, PdfRejected) as rejected:
+            file_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(rejected)) from rejected
+        except Exception:
+            file_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail="No se pudo leer el archivo. Puede estar dañado.",
             )
 
-        print(f"INFO: Archivo guardado -> {file_path} ({total_size:,} bytes)")
+        print(
+            f"INFO: Archivo guardado -> {log_safe_path(file_path, DATA_DIR)} "
+            f"({total_size:,} bytes) nombre={sanitize_log(original_name)}"
+        )
 
         return {
             "status": "uploaded",
@@ -800,20 +865,14 @@ async def process_document_stream(
         if not empresa:
             raise HTTPException(status_code=404, detail="Empresa no encontrada")
 
-        # Resolver ruta de forma segura — siempre dentro de UPLOADS_DIR
         if file_name:
-            # Sanitizar: solo el nombre del archivo, sin separadores de directorio
-            safe_name = sanitize_filename(file_name)
-            fp = (UPLOADS_DIR / safe_name).resolve()
+            fp = safe_join(UPLOADS_DIR, file_name)
         elif file_path:
-            # Fallback: construir desde el nombre del archivo en la ruta
-            safe_name = sanitize_filename(Path(file_path).name)
-            fp = (UPLOADS_DIR / safe_name).resolve()
+            fp = safe_join(UPLOADS_DIR, Path(file_path).name)
         else:
             raise HTTPException(status_code=400, detail="Se requiere file_name o file_path")
 
-        # Validación estricta anti path-traversal
-        if not validate_path_within(fp, UPLOADS_DIR):
+        if fp is None or not validate_path_within(fp, UPLOADS_DIR):
             raise HTTPException(status_code=403, detail="Acceso denegado: ruta fuera del directorio permitido")
         if not fp.exists():
             raise HTTPException(status_code=404, detail="Archivo no encontrado en uploads")
@@ -838,7 +897,6 @@ async def process_document_stream(
             headers={
                 "Cache-Control": "no-cache, no-store",
                 "X-Accel-Buffering": "no",
-                "Access-Control-Allow-Origin": "*",
                 "Connection": "keep-alive",
             }
         )
@@ -1300,18 +1358,15 @@ async def export_ledger(empresa_id: str, period_days: int = 30):
 @app.get("/api/exports/{filename}")
 async def download_export(filename: str):
     """Descarga un archivo exportado."""
-    # Sanitizar para prevenir path traversal
-    safe_name = _sanitize_filename(filename)
-    file_path = DATA_DIR / "exports" / safe_name
-    
-    if not _validate_path_within(file_path, DATA_DIR / "exports"):
+    safe = safe_join(DATA_DIR / "exports", filename)
+    if safe is None or not _validate_path_within(safe, DATA_DIR / "exports"):
         raise HTTPException(status_code=403, detail="Acceso denegado")
-    if not file_path.exists():
+    if not safe.exists():
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
-    
+
     return FileResponse(
-        path=str(file_path),
-        filename=safe_name,
+        path=str(safe),
+        filename=safe.name,
         media_type="application/octet-stream"
     )
 
@@ -1337,7 +1392,7 @@ async def preview_document(doc_id: str, full: bool = False):
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Archivo no encontrado")
         ext = file_path.suffix.lower()
-        headers = {"Cache-Control": "max-age=3600", "Access-Control-Allow-Origin": "*"}
+        headers = {"Cache-Control": "max-age=3600"}
 
         # Imágenes: servir directamente
         if ext in (".jpg", ".jpeg"):
@@ -1367,6 +1422,8 @@ async def preview_document(doc_id: str, full: bool = False):
             thumb_path = thumb_dir / (file_path.stem + suffix)
             try:
                 if thumb_path.exists() and thumb_path.stat().st_mtime >= file_path.stat().st_mtime:
+                    if not validate_path_within(thumb_path, UPLOADS_DIR):
+                        raise HTTPException(status_code=403, detail="Acceso denegado")
                     with open(str(thumb_path), "rb") as f:
                         data = f.read()
                     return Response(content=data, media_type="image/jpeg", headers=headers)
@@ -1387,7 +1444,7 @@ async def preview_document(doc_id: str, full: bool = False):
                     img_io.seek(0)
                     return StreamingResponse(img_io, media_type="image/jpeg", headers=headers)
             except Exception as e:
-                print(f"INFO: pdf2image error en preview ({e})")
+                print(f"INFO: pdf2image error en preview ({sanitize_log(e)})")
             # Fallback: retornar 204 para que la UI muestre ícono de PDF
             return Response(status_code=204, headers=headers)
         else:
@@ -1395,7 +1452,7 @@ async def preview_document(doc_id: str, full: bool = False):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error en preview: {e}")
+        print(f"Error en preview: {sanitize_log(e)}")
         return Response(status_code=204)
     finally:
         db.close()
@@ -1475,6 +1532,8 @@ async def reprocess_document(empresa_id: str, doc_id: str):
         if not doc.ruta_archivo_original:
             raise HTTPException(status_code=400, detail="El documento no tiene archivo original")
         file_path = Path(doc.ruta_archivo_original)
+        if not validate_path_within(file_path, UPLOADS_DIR):
+            raise HTTPException(status_code=403, detail="Acceso denegado")
         if not file_path.exists():
             raise HTTPException(status_code=404, detail="Archivo original no encontrado en disco")
         return {
@@ -1502,10 +1561,17 @@ async def delete_document(empresa_id: str, doc_id: str, delete_file: bool = Fals
         db.delete(doc)
         db.commit()
         if delete_file and file_path:
-            try:
-                Path(file_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+            target = Path(file_path)
+            if validate_path_within(target, UPLOADS_DIR):
+                try:
+                    target.unlink(missing_ok=True)
+                except Exception:
+                    pass
+            else:
+                _app_logger.warning(
+                    "No se borró un archivo fuera de uploads: %s",
+                    log_safe_path(target, DATA_DIR),
+                )
         return {"ok": True, "deleted_id": doc_id}
     finally:
         db.close()

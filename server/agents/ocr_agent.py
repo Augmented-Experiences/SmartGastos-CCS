@@ -2,7 +2,7 @@
 Agente OCR Multi-Estrategia para pyme-ledger-ai.
 
 Estrategias en orden de prioridad:
-  1. Para PDFs: PyPDF2 (texto digital) → pdf2image + RapidOCR/Tesseract
+  1. Para PDFs: pypdf (texto digital) → pdf2image + RapidOCR/Tesseract
   2. Para fotos/imágenes: RapidOCR ONNX (latin) → Tesseract → EasyOCR (Pinokio)
      → VLLM Ollama solo si el OCR clásico no sirvió y la salida no es alucinación.
 
@@ -83,10 +83,10 @@ def _is_desktop_sidecar() -> bool:
 
 # ── Imports opcionales ────────────────────────────────────────────────────────
 try:
-    import PyPDF2
-    _PYPDF2_OK = True
+    import pypdf  # noqa: F401
+    _PYPDF_OK = True
 except ImportError:
-    _PYPDF2_OK = False
+    _PYPDF_OK = False
 
 try:
     from PIL import Image, ImageFilter, ImageEnhance
@@ -162,7 +162,8 @@ def _preprocess(img_path: str, mode: str = "standard") -> str:
     if not _PIL_OK:
         return img_path
     try:
-        img = Image.open(img_path)
+        from security import open_receipt_image
+        img = open_receipt_image(img_path)
         if img.mode not in ('RGB', 'L'):
             img = img.convert('RGB')
 
@@ -254,7 +255,8 @@ def ocr_easyocr(img_path: str) -> str:
         if reader is None:
             return ""
 
-        img = Image.open(img_path)
+        from security import open_receipt_image
+        img = open_receipt_image(img_path)
         if img.mode not in ('RGB', 'L'):
             img = img.convert('RGB')
         img_array = np.array(img)
@@ -316,7 +318,8 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
         if _PIL_OK:
             try:
                 import io
-                img = Image.open(img_path)
+                from security import open_receipt_image
+                img = open_receipt_image(img_path)
                 w, h = img.size
                 if w > 1920 or h > 1920:
                     img.thumbnail((1920, 1920), Image.LANCZOS)
@@ -381,26 +384,23 @@ def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
         return ""
 
 
-# ── Estrategia 4: PyPDF2 para PDFs digitales ─────────────────────────────────
+# ── Estrategia 4: pypdf para PDFs digitales ──────────────────────────────────
 
 def ocr_pdf_digital(pdf_path: str) -> str:
-    if not _PYPDF2_OK:
+    if not _PYPDF_OK:
         return ""
     try:
-        parts = []
-        with open(pdf_path, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            for page in reader.pages:
-                t = page.extract_text() or ""
-                if t.strip():
-                    parts.append(t)
-        combined = '\n'.join(parts)
+        from security import read_pdf_text, PdfRejected, sanitize_log
+        combined = read_pdf_text(pdf_path)
         if _word_count(combined) > MIN_WORDS:
-            logger.info(f"PyPDF2: {_word_count(combined)} palabras")
+            logger.info("pypdf: %s palabras", _word_count(combined))
             return combined
         return ""
+    except PdfRejected as exc:
+        logger.info("PDF rechazado: %s", sanitize_log(exc))
+        return ""
     except Exception as e:
-        logger.debug(f"PyPDF2 falló: {e}")
+        logger.debug("pypdf falló: %s", sanitize_log(e))
         return ""
 
 
@@ -457,8 +457,8 @@ def ocr_region_text(file_path: str, x: float, y: float, w: float, h: float) -> s
     if ext == ".pdf":
         image = render_pdf_page(file_path)
     else:
-        from PIL import Image
-        image = Image.open(file_path).convert("RGB")
+        from security import open_receipt_image
+        image = open_receipt_image(file_path).convert("RGB")
     if image is None:
         return ""
     width, height = image.size
@@ -588,7 +588,7 @@ class OCRAgent:
       4. VLLM via Ollama (último recurso; se descarta si alucina)
 
     Orden de estrategias para PDFs:
-      1. PyPDF2 texto digital
+      1. pypdf texto digital
       2. pdf2image + RapidOCR/Tesseract
     """
 
@@ -597,10 +597,10 @@ class OCRAgent:
         self._vision_model: Optional[str] = None
         self._vision_model_checked = False
         logger.info(
-            "OCRAgent inicializado. Tesseract: %s | PIL: %s | PyPDF2: %s",
+            "OCRAgent inicializado. Tesseract: %s | PIL: %s | pypdf: %s",
             "yes" if _tesseract_available() else "no",
             "yes" if _PIL_OK else "no",
-            "yes" if _PYPDF2_OK else "no",
+            "yes" if _PYPDF_OK else "no",
         )
 
     def _get_vision_model_cached(self) -> Optional[str]:
@@ -698,9 +698,10 @@ class OCRAgent:
             allow_vllm=True,
             vision_model=vm,
         )
+        from security import log_safe_path
         logger.info(
             "OCR imagen %s: metodo=%s palabras=%s signal=%s estrategias=%s",
-            file_path,
+            log_safe_path(file_path),
             result.get("method"),
             result.get("words"),
             result.get("signal"),
@@ -762,7 +763,7 @@ if __name__ == '__main__':
     for f in test_files:
         if os.path.exists(f):
             print(f"\n{'='*60}")
-            print(f"Procesando: {f}")
+            print(f"Procesando: {Path(f).name}")
             print('='*60)
             result = agent.extract_from_file(f)
             print(f"Método:    {result['method']}")
@@ -770,6 +771,5 @@ if __name__ == '__main__':
             print(f"Confianza: {result['confidence']}")
             if 'strategies' in result:
                 print(f"Estrategias: {result['strategies']}")
-            print(f"\nTexto extraído:\n{result['text'][:800]}")
         else:
             print(f"Archivo no encontrado: {f}")

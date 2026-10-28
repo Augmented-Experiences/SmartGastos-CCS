@@ -51,6 +51,7 @@ from typing import Dict, Generator, List, Optional, Tuple
 from agents.ocr_agent import get_ocr_agent, render_pdf_page
 
 logger = logging.getLogger(__name__)
+from security import sanitize_log
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 
@@ -382,8 +383,9 @@ def _image_to_base64(img_path: str, max_size: int = 1600) -> Optional[str]:
     """
     try:
         from PIL import Image
+        from security import open_receipt_image
         import io as _io
-        img = Image.open(img_path)
+        img = open_receipt_image(img_path)
         if max(img.size) > max_size:
             img.thumbnail((max_size, max_size), Image.LANCZOS)
         buf = _io.BytesIO()
@@ -401,7 +403,8 @@ def _preprocess_image(img_path: str) -> List[str]:
     variants = [img_path]
     try:
         from PIL import Image, ImageFilter, ImageEnhance
-        img = Image.open(img_path)
+        from security import open_receipt_image
+        img = open_receipt_image(img_path)
         if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
 
@@ -519,8 +522,9 @@ def ocr_image(img_path: str) -> Dict:
             import easyocr
             import numpy as np
             from PIL import Image
+            from security import open_receipt_image
             reader = easyocr.Reader(["es", "en"], gpu=False, verbose=False)
-            img = Image.open(img_path)
+            img = open_receipt_image(img_path)
             results = reader.readtext(np.array(img), detail=0, paragraph=True)
             easy_text = "\n".join(str(r) for r in results)
             easy_words = len([w for w in easy_text.split() if len(w) > 2])
@@ -538,20 +542,16 @@ def ocr_pdf(pdf_path: str) -> Dict:
     """OCR para PDFs: texto digital primero, luego imagen."""
     # Texto digital
     try:
-        import pypdf
-        parts = []
-        with open(pdf_path, "rb") as f:
-            reader = pypdf.PdfReader(f)
-            for page in reader.pages:
-                t = page.extract_text() or ""
-                if t.strip():
-                    parts.append(t)
-        text = "\n".join(parts)
+        from security import read_pdf_text, PdfRejected, sanitize_log
+        text = read_pdf_text(pdf_path)
         words = len([w for w in text.split() if len(w) > 2])
         if words >= 15:
             return {"text": text, "words": words, "method": "pdf_digital"}
+    except PdfRejected as exc:
+        logger.info("PDF rechazado: %s", sanitize_log(exc))
+        return {"text": "", "words": 0, "method": "pdf_rejected", "error": str(exc)}
     except Exception as e:
-        logger.debug(f"Excepción controlada: {e}")
+        logger.debug("PDF digital: %s", sanitize_log(e))
 
     # PDF escaneado → imagen → OCR
     try:
@@ -1238,7 +1238,7 @@ class DocumentPipelineAgent:
                 "Pipeline OCR: metodo=%s palabras=%s archivo=%s",
                 ocr_result["method"],
                 ocr_result["words"],
-                original_filename,
+                sanitize_log(original_filename),
             )
 
             ctx["ocr_text"] = ocr_result["text"]
@@ -1597,8 +1597,10 @@ class DocumentPipelineAgent:
                                 f"proveedor ya clasificado previamente"
                             )
                             logger.info(
-                                f"Clasificación por memoria: {ctx['fields'].get('proveedor', '?')} "
-                                f"→ {mem_cat_name} (confianza: {memory_result['confianza']:.0%})"
+                                "Clasificación por memoria: %s → %s (confianza: %.0f%%)",
+                                sanitize_log(ctx["fields"].get("proveedor", "?")),
+                                sanitize_log(mem_cat_name),
+                                memory_result["confianza"] * 100,
                             )
                 except Exception as _mem_err:
                     logger.debug(f"Memoria de proveedor error (no crítico): {_mem_err}")
@@ -1914,7 +1916,11 @@ class DocumentPipelineAgent:
                         monto_total=float(ctx["fields"].get("monto_total", 0) or 0),
                         confianza=ctx["classification"]["confianza"]
                     )
-                    logger.info(f"Auto-aprendizaje guardado: {ctx['fields'].get('proveedor', '?')} → {ctx['classification']['categoria_sugerida']}")
+                    logger.info(
+                        "Auto-aprendizaje guardado: %s → %s",
+                        sanitize_log(ctx["fields"].get("proveedor", "?")),
+                        sanitize_log(ctx["classification"]["categoria_sugerida"]),
+                    )
             except Exception as _learn_err:
                 logger.debug(f"Auto-aprendizaje error (no crítico): {_learn_err}")
 

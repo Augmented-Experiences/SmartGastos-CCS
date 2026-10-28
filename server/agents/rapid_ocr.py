@@ -94,8 +94,9 @@ def _upright_image(img_path: str):
     try:
         import numpy as np
         from PIL import Image, ImageOps
+        from security import open_receipt_image
 
-        img = Image.open(img_path)
+        img = open_receipt_image(img_path)
         img = ImageOps.exif_transpose(img)
         if img.mode != "RGB":
             img = img.convert("RGB")

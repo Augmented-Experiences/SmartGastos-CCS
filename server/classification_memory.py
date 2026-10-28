@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
+from security import sanitize_log
 
 # Directorio de datos (se configura al importar)
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -140,7 +141,7 @@ def save_classification_learning(
         logger.warning(f"Archivo de aprendizaje truncado a {len(learnings)} entradas por límite de tamaño")
     
     learn_file.write_text(content, encoding="utf-8")
-    logger.info(f"Aprendizaje guardado: '{proveedor}' → '{new_cat_name}' (total: {len(learnings)})")
+    logger.info(f"Aprendizaje guardado: '{sanitize_log(proveedor)}' → '{sanitize_log(new_cat_name)}' (total: {len(learnings)})")
 
 
 def save_auto_classification_context(

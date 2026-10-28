@@ -290,12 +290,17 @@ class TestServerApp(unittest.TestCase):
             self.content = f.read()
 
     def test_uses_127_0_0_1(self):
-        """server/app.py usa 127.0.0.1 no localhost."""
-        # Permitir localhost solo en comentarios
+        """El proceso escucha en 127.0.0.1. localhost solo aparece en el origen CORS loopback."""
+        self.assertIn("127.0.0.1", self.content)
+        self.assertNotIn('host="localhost"', self.content)
+        self.assertNotIn("host='localhost'", self.content)
         lines = self.content.split("\n")
         for i, line in enumerate(lines, 1):
-            if "localhost" in line and not line.strip().startswith("#"):
-                self.fail(f"server/app.py línea {i} usa 'localhost': {line.strip()}")
+            if "localhost" not in line or line.strip().startswith("#"):
+                continue
+            if "allow_origin_regex" in line:
+                continue
+            self.fail(f"server/app.py línea {i} usa 'localhost': {line.strip()}")
 
     def test_no_unix_specific_imports(self):
         """server/app.py no importa módulos Unix-only."""

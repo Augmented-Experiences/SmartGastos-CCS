@@ -548,5 +548,181 @@ class TestXSSSanitization(unittest.TestCase):
         self.assertIn("safeHtml(", content)
 
 
+class TestPathTraversalHardening(unittest.TestCase):
+    """.., ruta absoluta, doble encoding y symlink no salen del directorio base."""
+
+    def test_dotdot_and_absolute_are_rejected(self):
+        from security import validate_path_within
+        base = Path(tempfile.mkdtemp())
+        (base / "ok.pdf").write_bytes(b"%PDF-1.4")
+        self.assertTrue(validate_path_within(base / "ok.pdf", base))
+        self.assertFalse(validate_path_within(base / ".." / "fuera.pdf", base))
+        self.assertFalse(validate_path_within(Path.cwd() / "fuera.pdf", base))
+
+    def test_double_encoding_stays_inside_base(self):
+        from security import safe_join, validate_path_within
+        base = Path(tempfile.mkdtemp())
+        joined = safe_join(base, "..%252f..%252fwindows%252fwin.ini")
+        self.assertIsNotNone(joined)
+        self.assertEqual(joined.name, "win.ini")
+        self.assertTrue(validate_path_within(joined, base))
+
+    def test_symlink_pointing_outside_is_rejected(self):
+        from security import validate_path_within
+        base = Path(tempfile.mkdtemp())
+        outside = Path(tempfile.mkdtemp())
+        secret = outside / "secret.pdf"
+        secret.write_bytes(b"%PDF-1.4")
+        link = base / "link.pdf"
+        try:
+            os.symlink(secret, link)
+        except OSError as exc:
+            self.skipTest(f"el sistema no permitió crear el symlink: {exc}")
+        self.assertFalse(validate_path_within(link, base))
+
+
+class TestLoopbackHost(unittest.TestCase):
+    def test_only_loopback_names(self):
+        from security import loopback_hostname
+        self.assertTrue(loopback_hostname("127.0.0.1:8000"))
+        self.assertTrue(loopback_hostname("localhost"))
+        self.assertTrue(loopback_hostname("[::1]:8000"))
+        self.assertFalse(loopback_hostname("evil.example"))
+        self.assertFalse(loopback_hostname(""))
+        self.assertFalse(loopback_hostname("testserver"))
+        self.assertTrue(loopback_hostname("testserver", allow_testserver=True))
+
+    def test_foreign_host_is_rejected_by_the_app(self):
+        from app import app
+        from fastapi.testclient import TestClient
+        client = TestClient(app, base_url="http://evil.example")
+        response = client.get("/api/health")
+        self.assertEqual(response.status_code, 403)
+
+
+class TestReceiptParsers(unittest.TestCase):
+    """Carga real de un PDF y de un PNG, y rechazo de PSD, PDF dañado y PDF largo."""
+
+    def _empresa(self):
+        from app import app
+        from fastapi.testclient import TestClient
+        import uuid as _uuid
+        client = TestClient(app)
+        rut = f"65.{_uuid.uuid4().hex[:3]}.{_uuid.uuid4().hex[:3]}-2"
+        created = client.post("/api/empresas", json={
+            "razon_social": "Test Comprobantes",
+            "rut": rut,
+            "pais": "Chile",
+        })
+        empresa_id = created.json().get("id")
+        if not empresa_id:
+            listed = client.get("/api/empresas").json().get("empresas", [])
+            empresa_id = listed[0]["id"]
+        return client, empresa_id
+
+    def test_png_and_pdf_upload_and_parse(self):
+        from PIL import Image
+        import pypdf
+        from security import open_receipt_image, read_pdf_text
+        client, empresa_id = self._empresa()
+
+        png_buf = io.BytesIO()
+        Image.new("RGB", (32, 24), (240, 240, 240)).save(png_buf, format="PNG")
+        png_buf.seek(0)
+        png = client.post(
+            f"/api/empresas/{empresa_id}/documentos/upload",
+            files={"file": ("boleta.png", png_buf, "image/png")},
+        )
+        self.assertEqual(png.status_code, 200, png.text)
+        saved = Path(png.json()["file_path"])
+        with open_receipt_image(saved) as img:
+            self.assertEqual(img.format, "PNG")
+            self.assertEqual(img.size, (32, 24))
+
+        pdf_buf = io.BytesIO()
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        writer.write(pdf_buf)
+        pdf_buf.seek(0)
+        pdf = client.post(
+            f"/api/empresas/{empresa_id}/documentos/upload",
+            files={"file": ("boleta.pdf", pdf_buf, "application/pdf")},
+        )
+        self.assertEqual(pdf.status_code, 200, pdf.text)
+        saved_pdf = Path(pdf.json()["file_path"])
+        self.assertIsInstance(read_pdf_text(saved_pdf), str)
+
+    def test_psd_renamed_as_jpeg_is_rejected(self):
+        from security import detect_upload_kind, open_receipt_image, ReceiptImageRejected
+        header = b"8BPS" + b"\x00" * 20
+        self.assertEqual(detect_upload_kind(header), "psd")
+        path = Path(tempfile.mkdtemp()) / "boleta.jpg"
+        path.write_bytes(header)
+        with self.assertRaises(ReceiptImageRejected):
+            open_receipt_image(path)
+        client, empresa_id = TestReceiptParsers._empresa(self)
+        response = client.post(
+            f"/api/empresas/{empresa_id}/documentos/upload",
+            files={"file": ("boleta.jpg", io.BytesIO(header), "image/jpeg")},
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_corrupt_pdf_and_too_many_pages(self):
+        import pypdf
+        from security import inspect_pdf, PdfRejected
+        client, empresa_id = self._empresa()
+        corrupt = client.post(
+            f"/api/empresas/{empresa_id}/documentos/upload",
+            files={"file": ("roto.pdf", io.BytesIO(b"%PDF-1.4\nnot a pdf"), "application/pdf")},
+        )
+        self.assertEqual(corrupt.status_code, 400)
+        long_buf = io.BytesIO()
+        writer = pypdf.PdfWriter()
+        for _ in range(21):
+            writer.add_blank_page(width=50, height=50)
+        writer.write(long_buf)
+        long_buf.seek(0)
+        path = Path(tempfile.mkdtemp()) / "largo.pdf"
+        path.write_bytes(long_buf.getvalue())
+        with self.assertRaises(PdfRejected):
+            inspect_pdf(path)
+        uploaded = client.post(
+            f"/api/empresas/{empresa_id}/documentos/upload",
+            files={"file": ("largo.pdf", io.BytesIO(long_buf.getvalue()), "application/pdf")},
+        )
+        self.assertEqual(uploaded.status_code, 400)
+
+    def test_decompression_bomb_is_a_clear_error(self):
+        from PIL import Image
+        import security
+        path = Path(tempfile.mkdtemp()) / "grande.png"
+        Image.new("RGB", (8, 8), "white").save(path, format="PNG")
+        previous = security.MAX_RECEIPT_PIXELS
+        security.MAX_RECEIPT_PIXELS = 0
+        try:
+            with self.assertRaises(security.ReceiptImageRejected) as caught:
+                security.open_receipt_image(path)
+            self.assertIn("megapíxeles", str(caught.exception))
+        finally:
+            security.MAX_RECEIPT_PIXELS = previous
+            from PIL import Image as _Image
+            _Image.MAX_IMAGE_PIXELS = previous
+
+
+class TestLogAndArtifactScope(unittest.TestCase):
+    def test_sanitize_log_strips_crlf(self):
+        from security import sanitize_log
+        cleaned = sanitize_log("proveedor\r\nFAKE admin")
+        self.assertNotIn("\n", cleaned)
+        self.assertNotIn("\r", cleaned)
+        self.assertIn("proveedor", cleaned)
+        self.assertIn("FAKE admin", cleaned)
+
+    def test_installer_spec_excludes_verify_script(self):
+        spec = (Path(__file__).parent.parent / "desktop" / "backend" / "backend.spec").read_text(encoding="utf-8")
+        self.assertIn('"verify_best_practices"', spec)
+        self.assertIn('str(SERVER / "app.py")', spec)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
