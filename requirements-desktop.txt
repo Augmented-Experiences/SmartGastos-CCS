@@ -3,11 +3,11 @@
 # Subconjunto liviano: sin easyocr/torch.
 # Fotos de boletas: RapidOCR + ONNX Runtime (latin). PDFs digitales: pypdf.
 # Moondream sigue en Ollama como último recurso; el pipeline descarta alucinaciones.
-# Pinokio sigue usando requirements.txt completo.
+# EasyOCR y el launcher Pinokio no forman parte de este repo.
 # ============================================================
 
 fastapi==0.162.0
-starlette==0.52.1
+starlette==1.10.0
 uvicorn==0.30.6
 python-multipart==0.0.32
 

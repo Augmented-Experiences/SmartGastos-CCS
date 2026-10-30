@@ -242,6 +242,17 @@ def validate_path_within(file_path: Path, base_dir: Path) -> bool:
         return False
 
 
+_STORAGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def storage_file(directory: Path, prefix: str, raw_id: str, suffix: str) -> Optional[Path]:
+    """Archivo dentro de directory. El id solo puede ser un token, nunca una ruta."""
+    if not _STORAGE_ID.fullmatch(str(raw_id or "")):
+        return None
+    directory.mkdir(parents=True, exist_ok=True)
+    return safe_join(directory, f"{prefix}{raw_id}{suffix}")
+
+
 def safe_join(base_dir: Path, untrusted_name: str) -> Optional[Path]:
     """Une un nombre no confiable a base_dir y devuelve None si escapa."""
     if untrusted_name is None:
@@ -332,7 +343,7 @@ def read_pdf_text(path) -> str:
     import pypdf
     reader = pypdf.PdfReader(str(path))
     parts = []
-    for index, page in enumerate(reader.pages):
+    for index, page in enumerate(list(reader.pages)[:MAX_PDF_PAGES]):
         if index >= MAX_PDF_PAGES:
             break
         try:

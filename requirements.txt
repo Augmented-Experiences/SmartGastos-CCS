@@ -1,12 +1,12 @@
 # ============================================================
 # Pyme Ledger AI — Dependencias Python
 # Paquetes reales de PyPI con versiones fijas y verificadas.
-# Instalado automáticamente por setup.py usando venv/bin/pip.
+# El instalador de escritorio usa este conjunto (sin EasyOCR ni torch).
 # ============================================================
 
 # ── Servidor web ─────────────────────────────────────────────
 fastapi==0.162.0
-starlette==0.52.1
+starlette==1.10.0
 uvicorn==0.30.6
 python-multipart==0.0.32
 
@@ -31,9 +31,9 @@ pytesseract==0.3.13
 # pdf2image: convierte páginas PDF a imágenes (requiere Poppler, opcional)
 pdf2image==1.17.0
 
-# ── OCR avanzado ─────────────────────────────────────────────
-# easyocr: OCR neuronal sin dependencias del sistema (descarga modelos ~1GB en primer uso)
-easyocr==1.7.2
+# ── OCR de fotos (sin torch). El instalador usa el mismo conjunto.
+rapidocr==3.3.1
+onnxruntime==1.19.2
 
 # ── Datos y análisis ─────────────────────────────────────────
 pandas==2.2.3

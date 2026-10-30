@@ -1,13 +1,6 @@
 """
-test_pinokio_config.py — Tests para archivos de configuración Pinokio
-======================================================================
-Verifica que todos los archivos de configuración cumplan con las
-buenas prácticas del skill pinokio-plugin-dev:
-  - pinokio.js: kernel.exists + kernel.script.running (no fs.existsSync)
-  - start.json: local.set + browser.open, sin localhost
-  - stop.json: shell.run cross-platform (no script.stop)
-  - install.json: venv + pip + ollama pull
-  - defaults/agents.json: alineado con pipeline real
+test_pinokio_config.py — Configuración del instalador de escritorio y de la UI.
+El launcher Pinokio no forma parte del release.
 """
 
 import unittest
@@ -16,146 +9,6 @@ import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent.resolve()
-
-
-class TestPinokioJs(unittest.TestCase):
-    """Tests para pinokio.js."""
-
-    def setUp(self):
-        self.path = REPO_ROOT / "pinokio.js"
-        self.content = self.path.read_text(encoding="utf-8")
-
-    def test_file_exists(self):
-        self.assertTrue(self.path.exists())
-
-    def test_uses_kernel_exists(self):
-        """Debe usar kernel.exists en vez de fs.existsSync."""
-        self.assertIn("kernel.exists", self.content)
-        self.assertNotIn("fs.existsSync", self.content)
-
-    def test_uses_kernel_script_running(self):
-        """Debe usar kernel.script.running en vez de info.running."""
-        self.assertIn("kernel.script.running", self.content)
-
-    def test_no_require_fs(self):
-        """No debe importar fs (usa API de Pinokio)."""
-        self.assertNotIn("require(\"fs\")", self.content)
-        self.assertNotIn("require('fs')", self.content)
-
-    def test_has_install_start_stop(self):
-        """Debe referenciar install.json, start.json, stop.json."""
-        self.assertIn("install.json", self.content)
-        self.assertIn("start.json", self.content)
-        self.assertIn("stop.json", self.content)
-
-    def test_has_title_and_icon(self):
-        """Debe tener title e icon."""
-        self.assertIn("title:", self.content)
-        self.assertIn("icon:", self.content)
-
-    def test_version_format(self):
-        """Versión debe ser semver."""
-        import re
-        match = re.search(r'version:\s*"(\d+\.\d+\.\d+)"', self.content)
-        self.assertIsNotNone(match, "Versión debe ser semver x.y.z")
-
-
-class TestStartJson(unittest.TestCase):
-    """Tests para start.json."""
-
-    def setUp(self):
-        self.path = REPO_ROOT / "start.json"
-        self.data = json.loads(self.path.read_text(encoding="utf-8"))
-
-    def test_file_exists(self):
-        self.assertTrue(self.path.exists())
-
-    def test_is_daemon(self):
-        """Debe ser daemon: true."""
-        self.assertTrue(self.data.get("daemon"))
-
-    def test_has_local_set(self):
-        """Debe tener local.set para capturar la URL."""
-        methods = [step.get("method") for step in self.data.get("run", [])]
-        self.assertIn("local.set", methods)
-
-    def test_has_browser_open(self):
-        """Debe tener browser.open para abrir la UI."""
-        methods = [step.get("method") for step in self.data.get("run", [])]
-        self.assertIn("browser.open", methods)
-
-    def test_no_localhost_in_env(self):
-        """No debe usar 'localhost' en env (usar 127.0.0.1)."""
-        content = self.path.read_text(encoding="utf-8")
-        # Buscar localhost en env pero no en comentarios
-        self.assertNotIn('"localhost"', content)
-
-    def test_has_cross_platform_ollama_start(self):
-        """Debe tener inicio de Ollama cross-platform (when platform)."""
-        content = self.path.read_text(encoding="utf-8")
-        self.assertIn("platform", content)
-
-    def test_has_venv(self):
-        """Debe usar venv para aislar dependencias."""
-        content = self.path.read_text(encoding="utf-8")
-        self.assertIn("venv", content)
-
-
-class TestStopJson(unittest.TestCase):
-    """Tests para stop.json."""
-
-    def setUp(self):
-        self.path = REPO_ROOT / "stop.json"
-        self.data = json.loads(self.path.read_text(encoding="utf-8"))
-
-    def test_file_exists(self):
-        self.assertTrue(self.path.exists())
-
-    def test_no_script_stop(self):
-        """NO debe usar script.stop (prohibido por el skill)."""
-        methods = [step.get("method") for step in self.data.get("run", [])]
-        self.assertNotIn("script.stop", methods)
-
-    def test_uses_shell_run(self):
-        """Debe usar shell.run para detener procesos."""
-        methods = [step.get("method") for step in self.data.get("run", [])]
-        self.assertIn("shell.run", methods)
-
-    def test_cross_platform(self):
-        """Debe tener ramas para win32 y no-win32."""
-        content = self.path.read_text(encoding="utf-8")
-        self.assertIn("win32", content)
-
-    def test_has_feedback_log(self):
-        """Debe tener log de confirmación."""
-        methods = [step.get("method") for step in self.data.get("run", [])]
-        self.assertIn("log", methods)
-
-
-class TestInstallJson(unittest.TestCase):
-    """Tests para install.json."""
-
-    def setUp(self):
-        self.path = REPO_ROOT / "install.json"
-        self.data = json.loads(self.path.read_text(encoding="utf-8"))
-
-    def test_file_exists(self):
-        self.assertTrue(self.path.exists())
-
-    def test_has_run_steps(self):
-        """Debe tener pasos de ejecución."""
-        self.assertIn("run", self.data)
-        self.assertGreater(len(self.data["run"]), 0)
-
-    def test_uses_setup_py(self):
-        """Debe usar setup.py para configurar entorno (venv + requirements)."""
-        content = self.path.read_text(encoding="utf-8")
-        self.assertIn("setup.py", content)
-
-    def test_uses_install_ollama(self):
-        """Debe usar install_ollama.py para instalar Ollama."""
-        content = self.path.read_text(encoding="utf-8")
-        self.assertIn("install_ollama", content)
 
 
 class TestDefaultsAgentsJson(unittest.TestCase):
@@ -354,11 +207,6 @@ class TestUIFiles(unittest.TestCase):
             self.assertIn("#00D53A", content)
             self.assertIn("#002558", content)
             self.assertIn("#3A89DA", content)
-        installer = (REPO_ROOT / "install.json").read_text(encoding="utf-8")
-        self.assertIn(expected_gradient, installer)
-        self.assertIn("#00D53A", installer)
-        self.assertIn("#002558", installer)
-        self.assertIn("#3A89DA", installer)
 
     def test_requirements_desktop_no_easyocr(self):
         lines = [
@@ -371,11 +219,6 @@ class TestUIFiles(unittest.TestCase):
         self.assertNotIn("torch", joined)
         self.assertIn("rapidocr", joined)
         self.assertIn("onnxruntime", joined)
-
-    def test_launcher_uses_lightweight_desktop_requirements(self):
-        setup = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
-        self.assertIn('BASE_DIR / "requirements-desktop.txt"', setup)
-
 
 class TestPortableOllama(unittest.TestCase):
     """La app de escritorio descarga Ollama portable; no usa MSI ni torch/OCR extra."""

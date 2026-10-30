@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
-from security import sanitize_log
+from security import sanitize_log, storage_file
 
 # Directorio de datos (se configura al importar)
 _DATA_DIR = Path(__file__).parent.parent / "data"
@@ -57,14 +57,15 @@ def save_classification_learning(
     """
     # Archivo de aprendizaje por empresa
     learn_dir = _DATA_DIR / "learning"
-    learn_dir.mkdir(parents=True, exist_ok=True)
-    learn_file = learn_dir / f"classifications_{empresa_id}.json"
+    learn_file = storage_file(learn_dir, "classifications_", empresa_id, ".json")
+    if learn_file is None:
+        return
 
     # Cargar aprendizajes existentes
     learnings = []
     if learn_file.exists():
         try:
-            learnings = json.loads(learn_file.read_text(encoding="utf-8"))
+            learnings = json.loads(learn_file.read_text(encoding="utf-8"))[:MAX_HUMAN_LEARNINGS]
         except Exception:
             learnings = []
 
@@ -168,14 +169,15 @@ def save_auto_classification_context(
 
     # Usar la misma función pero sin incrementar veces_corregido artificialmente
     learn_dir = _DATA_DIR / "learning"
-    learn_dir.mkdir(parents=True, exist_ok=True)
-    auto_file = learn_dir / f"auto_context_{empresa_id}.json"
+    auto_file = storage_file(learn_dir, "auto_context_", empresa_id, ".json")
+    if auto_file is None:
+        return
 
     # Cargar contexto automático existente
     auto_learnings = []
     if auto_file.exists():
         try:
-            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))
+            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))[:MAX_AUTO_LEARNINGS]
         except Exception:
             auto_learnings = []
 
@@ -240,22 +242,21 @@ def get_classification_learnings(empresa_id: str) -> str:
     contexto automático (prioridad media).
     """
     learn_dir = _DATA_DIR / "learning"
-
-    # 1. Correcciones humanas (máxima prioridad)
-    human_file = learn_dir / f"classifications_{empresa_id}.json"
+    human_file = storage_file(learn_dir, "classifications_", empresa_id, ".json")
+    auto_file = storage_file(learn_dir, "auto_context_", empresa_id, ".json")
+    if human_file is None or auto_file is None:
+        return ""
     human_learnings = []
     if human_file.exists():
         try:
-            human_learnings = json.loads(human_file.read_text(encoding="utf-8"))
+            human_learnings = json.loads(human_file.read_text(encoding="utf-8"))[:MAX_HUMAN_LEARNINGS]
         except Exception:
             pass
 
-    # 2. Contexto automático (prioridad media)
-    auto_file = learn_dir / f"auto_context_{empresa_id}.json"
     auto_learnings = []
     if auto_file.exists():
         try:
-            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))
+            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))[:MAX_AUTO_LEARNINGS]
         except Exception:
             pass
 
@@ -328,14 +329,15 @@ def find_provider_category(empresa_id: str, proveedor: str = "",
         return None
 
     learn_dir = _DATA_DIR / "learning"
+    human_file = storage_file(learn_dir, "classifications_", empresa_id, ".json")
+    auto_file = storage_file(learn_dir, "auto_context_", empresa_id, ".json")
+    if human_file is None or auto_file is None:
+        return None
     proveedor_norm = proveedor.strip().lower()[:100] if proveedor else ""
     rut_norm = rut_proveedor.strip().replace(".", "").replace("-", "").lower()[:20] if rut_proveedor else ""
-
-    # 1. Buscar en correcciones humanas (prioridad máxima)
-    human_file = learn_dir / f"classifications_{empresa_id}.json"
     if human_file.exists():
         try:
-            learnings = json.loads(human_file.read_text(encoding="utf-8"))
+            learnings = json.loads(human_file.read_text(encoding="utf-8"))[:MAX_HUMAN_LEARNINGS]
             for entry in learnings:
                 if rut_norm and entry.get("rut_norm") == rut_norm:
                     return {
@@ -354,11 +356,9 @@ def find_provider_category(empresa_id: str, proveedor: str = "",
         except Exception:
             pass
 
-    # 2. Buscar en contexto automático
-    auto_file = learn_dir / f"auto_context_{empresa_id}.json"
     if auto_file.exists():
         try:
-            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))
+            auto_learnings = json.loads(auto_file.read_text(encoding="utf-8"))[:MAX_AUTO_LEARNINGS]
             for entry in auto_learnings:
                 if entry.get("veces_visto", 0) < 2:
                     continue  # Solo confiar en patrones vistos 2+ veces

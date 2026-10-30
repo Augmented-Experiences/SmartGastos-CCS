@@ -184,7 +184,7 @@ class TestRapidOcrConfig(unittest.TestCase):
         with patch("agents.ocr_agent.ocr_rapidocr", return_value=BOLETA_TEXT), patch(
             "agents.ocr_agent.ocr_tesseract"
         ) as tess, patch("agents.ocr_agent.ocr_vllm_ollama") as vllm:
-            result = ocr_agent.run_image_ocr("foto.jpg", allow_easyocr=False, allow_vllm=True)
+            result = ocr_agent.run_image_ocr("foto.jpg", allow_vllm=True)
         self.assertEqual(result["method"], "rapidocr")
         tess.assert_not_called()
         vllm.assert_not_called()

@@ -4,7 +4,7 @@ Escaneo de origen: Checkmarx ASA Premium, 14 oct 2026, scan `d4cb7fca-b73b-4206-
 
 Este trabajo cierra la deuda que se puede verificar en el código de `kit`. No marca hallazgos de Checkmarx como resueltos: hace falta un re-scan.
 
-El entorno de build quedó actualizado. **No se generó un instalador nuevo en esta pasada.** Los `.exe` y `.dmg` de 1.1.8 que ya existen siguen empaquetando las librerías anteriores hasta que se vuelva a correr el build.
+El entorno de build quedó actualizado. **No se generó un instalador nuevo en esta pasada.** El instalador 1.1.9 que ya está generado sigue con Starlette 0.52.1 hasta que se vuelva a compilar.
 
 ## 1. Versiones
 
@@ -14,7 +14,7 @@ PyPI consultado el 27 oct 2026. Se instalaron en `venv` con `pip install -r requ
 |---|---|---|---|
 | Pillow | 10.4.0 | **13.0.0** | Última estable. Supera el mínimo 12.1.1 (CVE-2026-25990) y también 12.2.0, que corrige el bypass por overflow del mismo parser PSD. `Image.LANCZOS` y `Image.open(..., formats=)` siguen existiendo. |
 | python-multipart | 0.0.9 | **0.0.32** | Última estable. |
-| starlette | 0.38.6 | **0.52.1** | Última de la línea 0.x que cumple `starlette>=0.46` de FastAPI 0.162.0. No se subió a Starlette 1.10.0: FastAPI 0.162.0 no declara soporte de la línea 1.x y el salto sería aparte del combo. |
+| starlette | 0.38.6 | **1.10.0** | Cierra CVE-2026-48710, CVE-2026-48817, CVE-2026-48818 y CVE-2026-54282 del reporte del 29 oct. FastAPI 0.162.0 lo aceptó y los tests de API pasaron. |
 | fastapi | 0.115.0 | **0.162.0** | Última estable. Trae Starlette en el mismo install. Pydantic se quedó en 2.9.2 porque 0.162.0 acepta `pydantic>=2.9`. |
 | requests | 2.32.3 | **2.34.2** | Última estable. |
 | python-dotenv | 1.0.1 | **1.2.4** | Última estable. `load_dotenv` no se usa en el servidor; el pin queda alineado igual. |
@@ -27,7 +27,7 @@ FastAPI 0.162.0 arrastra `opentelemetry-api==1.45.1`, `annotated-doc` y `typing-
 
 | Archivo | Para qué |
 |---|---|
-| `requirements.txt` | Mismos pines para el install de Pinokio. |
+| `requirements.txt` | Mismos pines que el instalador. EasyOCR y el launcher Pinokio no están en el repo. |
 | `requirements-desktop.txt` | Pines del sidecar que arma el instalador. |
 | `server/security.py` | Rutas, magic bytes, `Image.open` con allowlist, tope de píxeles, límite de páginas PDF, sanitizado de logs y chequeo de Host. |
 | `server/app.py` | Upload rechaza contenido que no calza. Host solo loopback. CORS sin `*`. Borrado y descarga pasan por el helper de rutas. |
@@ -57,7 +57,7 @@ FastAPI 0.162.0 arrastra `opentelemetry-api==1.45.1`, `annotated-doc` y `typing-
 
 **Logs.** `sanitize_log` quita CR, LF y otros controles. `log_safe_path` deja la ruta completa solo si cae dentro de `DATA_DIR`; si no, solo el nombre. No se escribe el texto completo del comprobante en logs. La vista previa que la UI ya muestra en el pipeline no se tocó.
 
-**`verify_best_practices.py`.** No es entry point del sidecar (`Analysis` parte de `server/app.py`). Quedó además en `excludes`. No se borró.
+**`verify_best_practices.py`.** No iba en el instalador. Se eliminó del árbol para que el zip del repo no lo vuelva a escanear. `backend.spec` lo sigue listando en `excludes`.
 
 ## 4. Tests ejecutados
 
@@ -158,7 +158,7 @@ shapely==2.1.2
 six==1.17.0
 sniffio==1.3.1
 SQLAlchemy==2.0.35
-starlette==0.52.1
+starlette==1.10.0
 sympy==1.14.0
 tqdm==4.70.1
 typing-inspection==0.4.4
@@ -175,7 +175,7 @@ Sin archivo, línea y data flow no se cierra hallazgo SAST genérico. Quedan en 
 - Los 34 SAST que el PDF solo resume por conteo (Path Traversal 6, y el resto repartido en `app.py` 18, `classification_memory.py` 4, `pipeline_agent.py` 4, `verify_best_practices.py` 2, `ocr_agent.py` 2, `extractor_agent.py` 2, `analyzer.py` 1, `recommender.py` 1). El código de `kit` ya tenía controles de path traversal; esta pasada los unificó y les agregó tests. Igual hace falta la traza de Checkmarx para decir «falso positivo» o «sigue abierto» en cada uno.
 - Log Forging aparece como el hallazgo más antiguo del resumen, sin ubicación. El sanitizado de logs está puesto en los módulos que el PDF nombra y que sí escriben input. Sin la traza no se puede afirmar que Checkmarx apunte exactamente a esas líneas.
 - Los 34 SCA deberían bajar en un re-scan sobre `kit` con estos pines. No se contrastó cada CVE del PDF, uno por uno, contra el changelog: el PDF lista Pillow por CVE y agrupa el resto por paquete.
-- `PINOKIO_ORIGIN`, si alguien lo define, sigue pudiendo sumar un origen CORS. El instalador de escritorio no lo define.
+- `PINOKIO_ORIGIN` ya no suma un origen CORS. El instalador no usa ese launcher.
 - El test de symlink no corrió en esta máquina (WinError 1314).
 - No hay instalador  nuevo con estas librerías. Hay que recompilar el sidecar para que el `.exe` / `.dmg` las lleven.
 - Token de sesión local: propuesto arriba, no implementado.

@@ -718,6 +718,15 @@ class TestLogAndArtifactScope(unittest.TestCase):
         self.assertIn("proveedor", cleaned)
         self.assertIn("FAKE admin", cleaned)
 
+    def test_storage_file_rejects_path_ids(self):
+        from security import storage_file
+        base = Path(tempfile.mkdtemp())
+        ok = storage_file(base, "classifications_", "abc-123", ".json")
+        self.assertIsNotNone(ok)
+        self.assertEqual(ok.parent.resolve(), base.resolve())
+        self.assertIsNone(storage_file(base, "classifications_", "../etc", ".json"))
+        self.assertIsNone(storage_file(base, "mappings_", "..%2f..%2fwindows", ".md"))
+
     def test_installer_spec_excludes_verify_script(self):
         spec = (Path(__file__).parent.parent / "desktop" / "backend" / "backend.spec").read_text(encoding="utf-8")
         self.assertIn('"verify_best_practices"', spec)

@@ -516,25 +516,6 @@ def ocr_image(img_path: str) -> Dict:
         except Exception as e:
             logger.debug(f"Excepción controlada: {e}")
 
-    # EasyOCR si Tesseract dio poco
-    if best_words < 15:
-        try:
-            import easyocr
-            import numpy as np
-            from PIL import Image
-            from security import open_receipt_image
-            reader = easyocr.Reader(["es", "en"], gpu=False, verbose=False)
-            img = open_receipt_image(img_path)
-            results = reader.readtext(np.array(img), detail=0, paragraph=True)
-            easy_text = "\n".join(str(r) for r in results)
-            easy_words = len([w for w in easy_text.split() if len(w) > 2])
-            if easy_words > best_words:
-                best_text = easy_text
-                best_words = easy_words
-                method = "easyocr"
-        except Exception as e:
-            logger.debug(f"EasyOCR: {e}")
-
     return {"text": best_text, "words": best_words, "method": method}
 
 

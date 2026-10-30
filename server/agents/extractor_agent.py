@@ -360,7 +360,7 @@ Responde SOLO con JSON, sin markdown, sin explicaciones."""
 
     def batch_extract(self, documents: list) -> list:
         results = []
-        for i, text in enumerate(documents):
+        for i, text in enumerate(list(documents)[:30]):
             result = self.extract_fields(text)
             result["_index"] = i
             results.append(result)

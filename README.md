@@ -4,7 +4,7 @@
 
 ## Descripción
 
-**Pyme Ledger AI** es un plugin para [Pinokio](https://pinokio.computer) que permite a pequeñas y medianas empresas gestionar sus documentos contables con inteligencia artificial completamente offline. Extrae, clasifica y organiza facturas, boletas y comprobantes de forma automática usando modelos de IA locales (Ollama + LLaMA).
+**SmartGastos** es una aplicación de escritorio para que pequeñas y medianas empresas gestionen sus documentos contables con inteligencia artificial local. Extrae, clasifica y organiza facturas, boletas y comprobantes usando modelos locales (Ollama).
 
 ---
 
@@ -12,7 +12,7 @@
 
 ### Ingesta Documental
 - Carga de documentos PDF, JPG y PNG mediante drag & drop
-- OCR automático con Tesseract y EasyOCR para documentos escaneados
+- OCR automático con RapidOCR para documentos escaneados
 - Extracción de campos clave: proveedor, RUT, folio, fecha, montos, IVA
 
 ### Clasificación Inteligente
@@ -60,16 +60,9 @@
 
 ## Instalación
 
-1. Instalar [Pinokio](https://pinokio.computer)
-2. Abrir Pinokio y hacer clic en **Discover**
-3. Buscar **Pyme Ledger AI** o pegar la URL del repositorio
-4. Hacer clic en **Instalar** — el proceso es automático
+El release es el instalador de escritorio (Windows `.exe` / macOS `.dmg`), armado desde `desktop/`. Al abrirlo, la app descarga Ollama portable y el modelo de texto según la RAM. Los datos quedan en la carpeta local de SmartGastos.
 
-El instalador se encarga de:
-- Instalar Ollama (motor de IA local)
-- Descargar el modelo de lenguaje apropiado según la RAM disponible
-- Configurar el entorno Python con todas las dependencias
-- Inicializar la base de datos SQLite
+Para compilarlo en esta máquina: `desktop/WINDOWS-BUILD.md` y `desktop/README.md`.
 
 ---
 
@@ -111,7 +104,7 @@ pyme-ledger-ai/
 │   ├── models.py                 # Modelos SQLAlchemy (SQLite)
 │   ├── database.py               # Gestión de BD
 │   ├── agents/
-│   │   ├── ocr_agent.py          # Extracción de texto (Tesseract/EasyOCR)
+│   │   ├── ocr_agent.py          # Extracción de texto (RapidOCR)
 │   │   ├── extractor_agent.py    # Extracción de campos (LLM)
 │   │   ├── classifier_agent.py   # Clasificación de gastos (LLM + reglas)
 │   │   └── auditor_agent.py      # Validación y detección de anomalías
@@ -126,10 +119,7 @@ pyme-ledger-ai/
 ├── defaults/
 │   ├── agents.json               # Configuración de agentes
 │   └── prompts/                  # Prompts del sistema
-├── pinokio.js                    # Configuración del plugin
-├── install.json                  # Script de instalación
-├── start.json                    # Script de inicio
-└── stop.json                     # Script de parada
+└── desktop/                      # Instalador Tauri (el release)
 ```
 
 ---
@@ -148,14 +138,14 @@ pyme-ledger-ai/
 
 - **100% offline**: ningún dato sale del equipo
 - **Sin telemetría**: no se envían datos a servidores externos
-- **Datos locales**: toda la información se almacena en SQLite en el directorio del plugin
+- **Datos locales**: toda la información se almacena en SQLite en la carpeta de datos de la app
 - **Código abierto**: todo el código es auditable
 
 ---
 
 ## Instalador de escritorio (SmartSuite / Tauri)
 
-Además del plugin Pinokio, este repo incluye el kit **SmartSuite** en `desktop/` (Tauri + splash + sidecar PyInstaller), configurado vía `desktop/smartsuite.config.json` (acento `#2E9E3F`, modelo de visión **moondream** para OCR neuronal vía Ollama).
+El kit **SmartSuite** está en `desktop/` (Tauri + splash + sidecar PyInstaller), configurado vía `desktop/smartsuite.config.json`. El modelo de visión **moondream** solo se usa en los perfiles Completo y Máximo.
 
 - Dependencias del sidecar: `requirements-desktop.txt` (sin `easyocr` ni `torch`).
 - Build local: ver `desktop/README.md` y `desktop/WINDOWS-BUILD.md`.

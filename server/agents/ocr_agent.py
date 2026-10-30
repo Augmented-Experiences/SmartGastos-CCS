@@ -3,7 +3,7 @@ Agente OCR Multi-Estrategia para pyme-ledger-ai.
 
 Estrategias en orden de prioridad:
   1. Para PDFs: pypdf (texto digital) → pdf2image + RapidOCR/Tesseract
-  2. Para fotos/imágenes: RapidOCR ONNX (latin) → Tesseract → EasyOCR (Pinokio)
+  2. Para fotos/imágenes: RapidOCR ONNX (latin) → Tesseract
      → VLLM Ollama solo si el OCR clásico no sirvió y la salida no es alucinación.
 
 Moondream es un captioner, no un OCR: en fotos de boletas térmicas inventa
@@ -75,12 +75,6 @@ def _sanitize_repetitive_ocr(text: str) -> str:
     return original
 
 
-def _is_desktop_sidecar() -> bool:
-    """Instalador Tauri (PyInstaller): OCR neuronal via Ollama, sin EasyOCR/torch."""
-    import sys
-
-    return os.environ.get("RUN_BY_TAURI") == "1" or bool(getattr(sys, "frozen", False))
-
 # ── Imports opcionales ────────────────────────────────────────────────────────
 try:
     import pypdf  # noqa: F401
@@ -93,10 +87,6 @@ try:
     _PIL_OK = True
 except ImportError:
     _PIL_OK = False
-
-# EasyOCR: lazy load para no bloquear el arranque del servidor
-_easyocr_reader = None
-_easyocr_tried = False
 
 # Tesseract: verificar disponibilidad una sola vez
 _tesseract_ok: Optional[bool] = None
@@ -119,21 +109,6 @@ def _tesseract_available() -> bool:
         except Exception:
             _tesseract_ok = False
     return _tesseract_ok
-
-
-def _get_easyocr_reader():
-    global _easyocr_reader, _easyocr_tried
-    if _easyocr_tried:
-        return _easyocr_reader
-    _easyocr_tried = True
-    try:
-        import easyocr
-        _easyocr_reader = easyocr.Reader(["es", "en"], gpu=False, verbose=False)
-        logger.info("EasyOCR cargado correctamente")
-    except Exception as e:
-        logger.info(f"EasyOCR no disponible: {e}")
-        _easyocr_reader = None
-    return _easyocr_reader
 
 
 def _get_vision_model() -> Optional[str]:
@@ -245,49 +220,7 @@ def ocr_tesseract(img_path: str) -> str:
     return best_text
 
 
-# ── Estrategia 2: EasyOCR ────────────────────────────────────────────────────
-
-def ocr_easyocr(img_path: str) -> str:
-    """EasyOCR — mejor para texto manuscrito y fuentes no estándar."""
-    try:
-        import numpy as np
-        reader = _get_easyocr_reader()
-        if reader is None:
-            return ""
-
-        from security import open_receipt_image
-        img = open_receipt_image(img_path)
-        if img.mode not in ('RGB', 'L'):
-            img = img.convert('RGB')
-        img_array = np.array(img)
-
-        results = reader.readtext(img_array, detail=1, paragraph=False)
-        # Ordenar top-to-bottom
-        results_sorted = sorted(results, key=lambda x: x[0][0][1])
-
-        lines, current_line, prev_y = [], [], -1
-        for bbox, text, conf in results_sorted:
-            if conf < 0.1:
-                continue
-            y_center = (bbox[0][1] + bbox[2][1]) / 2
-            if prev_y >= 0 and (y_center - prev_y) > 20:
-                if current_line:
-                    lines.append(' '.join(current_line))
-                    current_line = []
-            current_line.append(text)
-            prev_y = y_center
-        if current_line:
-            lines.append(' '.join(current_line))
-
-        text = '\n'.join(lines)
-        logger.info(f"EasyOCR resultado: {_word_count(text)} palabras")
-        return text
-    except Exception as e:
-        logger.warning(f"EasyOCR falló: {e}")
-        return ""
-
-
-# ── Estrategia 3: VLLM via Ollama ────────────────────────────────────────────
+# ── Estrategia 2: VLLM via Ollama ────────────────────────────────────────────
 
 def ocr_vllm_ollama(img_path: str, model: Optional[str] = None) -> str:
     """
@@ -475,7 +408,6 @@ def ocr_region_text(file_path: str, x: float, y: float, w: float, h: float) -> s
     try:
         result = run_image_ocr(
             tmp_name,
-            allow_easyocr=not _is_desktop_sidecar(),
             allow_vllm=False,
         )
         return (result.get("text") or "").strip()
@@ -499,7 +431,6 @@ def ocr_pdf_scanned(pdf_path: str) -> str:
                 tmp_name = tmp.name
             page = run_image_ocr(
                 tmp_name,
-                allow_easyocr=not _is_desktop_sidecar(),
                 allow_vllm=False,
             )
             t = page.get("text") or ""
@@ -526,7 +457,6 @@ def _ocr_enough(candidate: Dict) -> bool:
 def run_image_ocr(
     img_path: str,
     *,
-    allow_easyocr: bool = True,
     allow_vllm: bool = True,
     vision_model: Optional[str] = None,
 ) -> Dict:
@@ -548,14 +478,6 @@ def run_image_ocr(
         strategies_tried["tesseract"] = wc_tess
         if text_tess:
             candidates.append({"text": text_tess, "method": "tesseract"})
-            best = pick_ocr_result(candidates)
-
-    if allow_easyocr and not _ocr_enough(best):
-        text_easy = ocr_easyocr(img_path)
-        wc_easy = _word_count(text_easy)
-        strategies_tried["easyocr"] = wc_easy
-        if text_easy:
-            candidates.append({"text": text_easy, "method": "easyocr"})
             best = pick_ocr_result(candidates)
 
     if allow_vllm and not _ocr_enough(best):
@@ -584,8 +506,7 @@ class OCRAgent:
     Orden de estrategias para imágenes:
       1. RapidOCR ONNX (latin) — OCR real para fotos de boletas
       2. Tesseract (si RapidOCR da poco texto)
-      3. EasyOCR (solo Pinokio / no sidecar)
-      4. VLLM via Ollama (último recurso; se descarta si alucina)
+      3. VLLM via Ollama (último recurso; se descarta si alucina)
 
     Orden de estrategias para PDFs:
       1. pypdf texto digital
@@ -694,7 +615,6 @@ class OCRAgent:
         vm = self._get_vision_model_cached()
         result = run_image_ocr(
             file_path,
-            allow_easyocr=not _is_desktop_sidecar(),
             allow_vllm=True,
             vision_model=vm,
         )

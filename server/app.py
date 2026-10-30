@@ -1,5 +1,5 @@
 """
-SmartGastos — Backend FastAPI (plugin Pinokio + sidecar desktop SmartSuite).
+SmartGastos — Backend FastAPI (sidecar de escritorio SmartSuite).
 API para empresas, documentos, analítica y exportación.
 """
 import math
@@ -125,15 +125,11 @@ init_db()
 
 app = FastAPI(title="SmartGastos", version="1.6.0")
 
-# CORS restringido a loopback (plugin on-premise, compatible cross-platform)
+# CORS restringido a loopback. El instalador sirve la UI en el mismo origen.
 _ALLOWED_ORIGINS = [
     "http://127.0.0.1",
     f"http://127.0.0.1:{PORT}",
 ]
-# Agregar orígenes dinámicos de Pinokio si están configurados
-_pinokio_origin = os.environ.get("PINOKIO_ORIGIN", "")
-if _pinokio_origin:
-    _ALLOWED_ORIGINS.append(_pinokio_origin)
 
 app.add_middleware(
     CORSMiddleware,
@@ -1149,7 +1145,7 @@ async def update_document(empresa_id: str, doc_id: str, update: DocumentoUpdate)
                         monto_total=doc.monto_total
                     )
                 except Exception as learn_err:
-                    print(f"WARN: Error guardando aprendizaje de clasificaci\u00f3n: {learn_err}")
+                    print(f"WARN: Error guardando aprendizaje de clasificación: {sanitize_log(learn_err)}")
         if update.centro_costo_id is not None:
             doc.centro_costo_id = update.centro_costo_id
         if update.estado_revision is not None:
@@ -1599,9 +1595,11 @@ async def learn_field_mapping(empresa_id: str, mapping: FieldMappingLearn):
     para los agentes en futuras lecturas.
     """
     # Usar DATA_DIR absoluto (nunca rutas relativas — requerido por Pinokio)
+    from security import storage_file
     learning_dir = DATA_DIR / "learning"
-    learning_dir.mkdir(parents=True, exist_ok=True)
-    mappings_file = learning_dir / f"mappings_{empresa_id}.md"
+    mappings_file = storage_file(learning_dir, "mappings_", empresa_id, ".md")
+    if mappings_file is None:
+        raise HTTPException(status_code=400, detail="Identificador de empresa no válido")
 
     # Leer mapeos existentes
     existing = mappings_file.read_text(encoding="utf-8") if mappings_file.exists() else ""
@@ -1613,7 +1611,7 @@ async def learn_field_mapping(empresa_id: str, mapping: FieldMappingLearn):
         lines = existing.split("\n")
         new_lines = []
         skip = False
-        for line in lines:
+        for line in lines[:5000]:
             if entry_key in line:
                 skip = True
             elif skip and line.startswith("- "):
@@ -1654,14 +1652,15 @@ Los agentes deben usar estos mapeos como contexto para clasificar atributos dete
 @app.get("/api/empresas/{empresa_id}/learning/field-mappings")
 async def get_field_mappings(empresa_id: str):
     """Devuelve todos los mapeos aprendidos para una empresa."""
+    from security import storage_file
     learning_dir = DATA_DIR / "learning"
-    mappings_file = learning_dir / f"mappings_{empresa_id}.md"
-    if not mappings_file.exists():
+    mappings_file = storage_file(learning_dir, "mappings_", empresa_id, ".md")
+    if mappings_file is None or not mappings_file.exists():
         return {"mappings": [], "content": ""}
     content = mappings_file.read_text(encoding="utf-8")
     # Parsear los mapeos del markdown
     mappings = []
-    for line in content.split("\n"):
+    for line in content.split("\n")[:5000]:
         if line.startswith("## Mapeo aprendido:"):
             # Extraer origen y destino
             import re
